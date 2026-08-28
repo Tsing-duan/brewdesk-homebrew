@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a bounded improvement for the public Alpha
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Describe the observable problem before proposing implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and current workaround
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Bounded proposal
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Security boundaries
+      options:
+        - label: This proposal does not require global proxy or Homebrew configuration writes.
+          required: true
+        - label: I have not included private inventory, credentials, tester identity, recipient data, or private manifests.
+          required: true

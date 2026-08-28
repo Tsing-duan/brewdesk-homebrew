@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "brewdesk-stage-a-canary"
+description = "Dynamic Stage A scanner canary"
+regex = '''BREWDESK_GITLEAKS_CANARY_[A-F0-9]{64}'''
+keywords = ["BREWDESK_GITLEAKS_CANARY_"]

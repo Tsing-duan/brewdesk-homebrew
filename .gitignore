@@ -1,0 +1,17 @@
+node_modules/
+.DS_Store
+dist/
+target/
+src-tauri/target/
+src-tauri/binaries/*-apple-darwin
+.playwright-cli/
+output/
+*.app
+*.dmg
+*.pkg
+*.zip
+.env
+.env.*
+*.pem
+*.p12
+*.mobileprovision
