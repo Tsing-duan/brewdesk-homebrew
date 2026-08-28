@@ -52,15 +52,19 @@ The public build contract uses:
 ## Source verification
 
 ```bash
+install -d -m 700 /absolute/private/brewdesk-build
+export PUBLIC_BUILD_ROOT=/absolute/private/brewdesk-build
+export CARGO_TARGET_DIR="$PUBLIC_BUILD_ROOT/cargo-target"
 npm ci
 npm test
 npm run build
+npm run test:rust-output-boundary
 cargo fmt --check --manifest-path src-tauri/Cargo.toml
-cargo test --locked --manifest-path src-tauri/Cargo.toml
-cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features
+cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 ```
 
-Rust, Swift, Vite, Tauri, and `.app` outputs must be directed to a private build root outside the repository. `scripts/build-native-helpers.sh` rejects an unset or in-repository `PUBLIC_BUILD_ROOT`.
+Rust, Swift, Vite, Tauri, and `.app` outputs must be directed to a private build root outside the repository. `scripts/build-native-helpers.sh` rejects an unset or in-repository `PUBLIC_BUILD_ROOT`; the Rust boundary test also proves that Tauri capability schemas are emitted under the external Cargo target instead of `src-tauri/gen`.
 
 The final Bundle Identifier is `io.github.tsing-duan.brewdesk`. The application icon was generated specifically for BrewDesk with Codex and is documented in [Asset Sources](docs/ASSET_SOURCES.md). Ad-hoc verification is a source-build integrity check; it is not Gatekeeper approval, notarization, or binary distribution approval.
 

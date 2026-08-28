@@ -15,6 +15,7 @@ Thank you for helping improve BrewDesk. This repository is preparing an early pu
 - Use the exact Rust toolchain declared by `rust-toolchain.toml` once that file is finalized.
 - Invoke the project-local Tauri CLI through `npm run tauri`; do not depend on a globally installed CLI.
 - Direct every Rust, Swift, Vite, Tauri, and application artifact to an absolute `PUBLIC_BUILD_ROOT` outside the repository.
+- Set `CARGO_TARGET_DIR` below that private root and run `npm run test:rust-output-boundary` before treating a Rust or Tauri build as repository-clean evidence.
 - Keep network routing task-scoped. Do not write proxy or mirror values to Homebrew, macOS, Git, npm, Cargo, or shell global configuration.
 - Preserve the executable-plus-argv command boundary and strict mutation-token validation.
 

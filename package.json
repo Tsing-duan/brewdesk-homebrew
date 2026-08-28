@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:ci-contract": "sh scripts/test-ci-contract.sh",
     "test:build-boundaries": "sh scripts/test-build-boundaries.sh",
+    "test:rust-output-boundary": "sh scripts/test-rust-output-boundary.sh",
     "test:app-verifier": "sh scripts/test-verify-app-contract.sh",
     "build:native-helpers": "sh scripts/build-native-helpers.sh",
     "app:build": "sh scripts/build-app.sh",

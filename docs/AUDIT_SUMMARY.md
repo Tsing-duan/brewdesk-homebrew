@@ -6,6 +6,7 @@ This is the redacted Stage A summary for the local BrewDesk public-release candi
 
 - The candidate was created by a sanitized allowlist export with `lstat`, realpath containment, special-file, symbolic-link, hard-link, case-collision, identity, and source/target SHA-256 checks.
 - The original source remained read-only. Private distribution material, generated dependencies, caches, build outputs, archives, and native binaries were not imported into the public tree.
+- Rust builds stage Tauri's writable capability-schema context below external Cargo `OUT_DIR`; the final tree contains no `src-tauri/gen`, and an executable boundary test verifies it remains absent after compilation.
 - The known private ledger was never intentionally opened, hashed, copied, archived, or supplied to an approved content scan. Its path state, type, owner, permissions, and exclusion state were checked privately.
 - One exploratory text-search invocation had ineffective exclusions and was stopped immediately. Its output was not used for any conclusion, no ledger match/path/value appeared, no output file was retained, and nothing from it was written to the candidate or transmitted. The private report records this as an audit deviation rather than treating it as positive scan evidence.
 - Unverified pre-generated Chinese description text was removed. Existing upstream Chinese descriptions and optional local macOS translation remain available without being represented as official Homebrew Chinese data.

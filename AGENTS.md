@@ -21,6 +21,7 @@ Read `README.md`, `CONTRIBUTING.md`, `docs/ARCHITECTURE.md`, `docs/SECURITY_MODE
 - Use Node.js 24 and the exact dependencies in the lockfile.
 - Use the exact Rust toolchain in `rust-toolchain.toml` and the project-local exact `@tauri-apps/cli`.
 - Keep all Rust, Swift, Vite, Tauri, and `.app` outputs under an absolute `PUBLIC_BUILD_ROOT` outside the repository.
+- Use an external `CARGO_TARGET_DIR` and run `npm run test:rust-output-boundary`; Tauri capability schemas must remain in the external build context, never `src-tauri/gen`.
 - Do not chain shell commands into opaque one-liners in project scripts. Fail explicitly and preserve the first actionable error.
 - Check official sources before updating tool versions, Actions commit SHAs, platform claims, or security-advisory conclusions.
 - Add focused tests for package-name injection, argv construction, task-scoped network variables, global-write prohibitions, application conflict handling, and queue behavior when those areas change.

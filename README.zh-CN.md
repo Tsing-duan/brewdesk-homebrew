@@ -52,15 +52,19 @@ Homebrew 透明而强大，但终端优先的工作方式对部分中文 macOS �
 ## 源码验证
 
 ```bash
+install -d -m 700 /absolute/private/brewdesk-build
+export PUBLIC_BUILD_ROOT=/absolute/private/brewdesk-build
+export CARGO_TARGET_DIR="$PUBLIC_BUILD_ROOT/cargo-target"
 npm ci
 npm test
 npm run build
+npm run test:rust-output-boundary
 cargo fmt --check --manifest-path src-tauri/Cargo.toml
-cargo test --locked --manifest-path src-tauri/Cargo.toml
-cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features
+cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 ```
 
-Rust、Swift、Vite、Tauri 和 `.app` 产物必须定向到仓库外私有构建根。未设置 `PUBLIC_BUILD_ROOT` 或其位于仓库内时，`scripts/build-native-helpers.sh` 会拒绝运行。
+Rust、Swift、Vite、Tauri 和 `.app` 产物必须定向到仓库外私有构建根。未设置 `PUBLIC_BUILD_ROOT` 或其位于仓库内时，`scripts/build-native-helpers.sh` 会拒绝运行；Rust 边界测试还会证明 Tauri capability schemas 写入外部 Cargo target，而不是 `src-tauri/gen`。
 
 最终 Bundle Identifier 已确认为 `io.github.tsing-duan.brewdesk`。应用图标由 Codex 专门为 BrewDesk 生成，其来源记录见[素材来源](docs/ASSET_SOURCES.md)。Ad-hoc 验证只证明源码构建完整性，不代表 Gatekeeper、公证或二进制分发批准。
 
