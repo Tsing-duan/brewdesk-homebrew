@@ -1,0 +1,49 @@
+{
+  "name": "brewdesk",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Tsing-duan/brewdesk-homebrew.git"
+  },
+  "packageManager": "npm@11.19.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "sh scripts/build-web.sh",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:ci-contract": "sh scripts/test-ci-contract.sh",
+    "test:build-boundaries": "sh scripts/test-build-boundaries.sh",
+    "test:app-verifier": "sh scripts/test-verify-app-contract.sh",
+    "build:native-helpers": "sh scripts/build-native-helpers.sh",
+    "app:build": "sh scripts/build-app.sh",
+    "app:verify": "sh scripts/verify-app.sh",
+    "tauri": "tauri"
+  },
+  "engines": {
+    "node": ">=24 <25",
+    "npm": ">=11 <12"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0",
+    "lucide-react": "^0.525.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "typescript": "^5.8.3",
+    "jsdom": "^26.1.0",
+    "vite": "^7.0.4",
+    "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "nanoid": "3.3.18",
+    "postcss": "8.5.24"
+  }
+}
