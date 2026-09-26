@@ -6,10 +6,10 @@ BrewDesk source code is licensed under the MIT License. Third-party dependencies
 
 | Component | Version in lockfile | License |
 | --- | ---: | --- |
-| `@tauri-apps/api` | 2.8.0 | Apache-2.0 OR MIT |
+| `@tauri-apps/api` | 2.11.1 | Apache-2.0 OR MIT |
 | `lucide-react` | 0.525.0 | ISC |
-| `react` | 19.1.0 | MIT |
-| `react-dom` | 19.1.0 | MIT |
+| `react` | 19.2.8 | MIT |
+| `react-dom` | 19.2.8 | MIT |
 
 Development dependencies and their complete transitive versions are recorded in `package-lock.json`. Build-only dependencies remain governed by their own licenses, including the CC-BY-4.0 data package `caniuse-lite`.
 
