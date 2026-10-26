@@ -19,6 +19,7 @@ plist="$app_path/Contents/Info.plist"
 main_binary="$app_path/Contents/MacOS/brewdesk"
 translate_binary="$app_path/Contents/MacOS/brewdesk-translate"
 setup_binary="$app_path/Contents/MacOS/brewdesk-translation-setup"
+git_helper="$app_path/Contents/Resources/brewdesk-git.sh"
 
 for required_path in "$plist" "$main_binary" "$translate_binary" "$setup_binary"; do
   if [ ! -e "$required_path" ]; then
@@ -26,6 +27,12 @@ for required_path in "$plist" "$main_binary" "$translate_binary" "$setup_binary"
     exit 1
   fi
 done
+
+if [ ! -x "$git_helper" ]; then
+  printf 'Missing executable task-scoped Git helper: %s\n' "$git_helper" >&2
+  exit 1
+fi
+/bin/sh -n "$git_helper"
 
 actual_identifier=$(/usr/bin/plutil -extract CFBundleIdentifier raw "$plist")
 short_version=$(/usr/bin/plutil -extract CFBundleShortVersionString raw "$plist")

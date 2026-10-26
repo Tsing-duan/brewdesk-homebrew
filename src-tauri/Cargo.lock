@@ -147,6 +147,7 @@ name = "brewdesk"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "plist",
  "serde",
  "serde_json",
  "tauri",

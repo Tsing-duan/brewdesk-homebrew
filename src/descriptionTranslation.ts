@@ -79,6 +79,14 @@ export async function addChineseDescriptions<T extends DescribedItem>(items: T[]
     }
   }
 
+  return decorateDescriptions(items, cache);
+}
+
+export function localizeCachedDescriptions<T extends DescribedItem>(items: T[]): T[] {
+  return decorateDescriptions(items, readCache());
+}
+
+function decorateDescriptions<T extends DescribedItem>(items: T[], cache: Record<string, string>): T[] {
   return items.map((item) => {
     const local = localizeDescription(item.description, item.kind, item.token);
     if (local.chinese) {

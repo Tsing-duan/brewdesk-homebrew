@@ -26,6 +26,10 @@ Homebrew is transparent and powerful, but its terminal-first workflow can be unf
 - Queue Homebrew mutations through one worker instead of running them concurrently.
 - Display cached outdated-package data immediately and refresh it in the background.
 - Apply a system proxy, direct route, or mirror variables to the current child task only.
+- Reject failed HTTP routes before automatic selection and verify installed package/application evidence after mutations.
+- Show usable results before optional translation finishes, preserve lists during refresh, and restore their scroll position on return.
+
+See [Update Reliability and Validation](docs/UPDATE_RELIABILITY.md) for the current fixes, verification, and remaining limits.
 
 ## Security boundaries
 

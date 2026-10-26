@@ -14,6 +14,10 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
+mod app_metadata;
+mod operation_verification;
+use app_metadata::ApplicationMetadata;
+
 const DEFAULT_BREW_PATH: &str = "/opt/homebrew/bin/brew";
 const INTEL_BREW_PATH: &str = "/usr/local/bin/brew";
 const HOMEBREW_INSTALL_COMMAND: &str =
@@ -350,6 +354,7 @@ struct OperationLog {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OperationEvent {
+    reset_transfer: bool,
     operation_id: String,
     status: OperationStatus,
     phase: Option<OperationPhase>,
@@ -547,6 +552,8 @@ fn parse_loopback_proxy_ports(output: &str) -> Vec<u16> {
         "v2ray",
         "xray",
         "surge",
+        // Shadowrocket's local HTTP/SOCKS listener runs in this extension.
+        "macpackettunnel",
     ];
     let mut ports = Vec::new();
     for line in output.lines() {
@@ -750,9 +757,56 @@ fn clear_network_environment(command: &mut Command) {
     }
 }
 
+fn bundled_git_wrapper_path() -> PathBuf {
+    #[cfg(test)]
+    return Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/brewdesk-git.sh");
+    #[cfg(not(test))]
+    std::env::current_exe()
+        .unwrap_or_default()
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or_else(|| Path::new("."))
+        .join("Resources/brewdesk-git.sh")
+}
+
 fn apply_network_configuration(command: &mut Command, configuration: &NetworkConfiguration) {
     clear_network_environment(command);
     command.env("HOMEBREW_CURL_RETRIES", "5");
+    // A persisted mirror origin survives removing Homebrew's environment
+    // variables. Rewrite Git requests in this child only. In particular, do
+    // not set HOMEBREW_BREW_GIT_REMOTE: brew update may persist that to origin.
+    let official = "https://github.com/Homebrew/";
+    let mirror = "https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/";
+    let (from, to) = if configuration.effective_mode == EffectiveNetworkMode::Mirror {
+        (official, mirror)
+    } else {
+        (mirror, official)
+    };
+    let inherited_count = std::env::var("GIT_CONFIG_COUNT")
+        .ok()
+        .and_then(|count| count.parse::<usize>().ok())
+        .unwrap_or(0);
+    for (offset, suffix) in ["", "brew.git"].iter().enumerate() {
+        let index = inherited_count + offset;
+        command.env(
+            format!("GIT_CONFIG_KEY_{index}"),
+            format!("url.{to}{suffix}.insteadOf"),
+        );
+        command.env(
+            format!("GIT_CONFIG_VALUE_{index}"),
+            format!("{from}{suffix}"),
+        );
+    }
+    command.env("GIT_CONFIG_COUNT", (inherited_count + 2).to_string());
+    command.env("HOMEBREW_GIT_PATH", bundled_git_wrapper_path());
+    command.env(
+        "HOMEBREW_BREWDESK_GIT_ROUTE",
+        if configuration.effective_mode == EffectiveNetworkMode::Mirror {
+            "mirror"
+        } else {
+            "official"
+        },
+    );
     match configuration.effective_mode {
         EffectiveNetworkMode::Direct => {
             command.env("HOMEBREW_DOWNLOAD_CONCURRENCY", "2");
@@ -761,7 +815,6 @@ fn apply_network_configuration(command: &mut Command, configuration: &NetworkCon
             command
                 .env("HOMEBREW_API_DOMAIN", TUNA_API_DOMAIN)
                 .env("HOMEBREW_BOTTLE_DOMAIN", TUNA_BOTTLE_DOMAIN)
-                .env("HOMEBREW_BREW_GIT_REMOTE", TUNA_BREW_GIT_REMOTE)
                 .env("HOMEBREW_DOWNLOAD_CONCURRENCY", "1");
         }
         EffectiveNetworkMode::SystemProxy => {
@@ -1427,20 +1480,7 @@ fn merge_search_results(
 }
 
 fn plist_value(app_path: &Path, key: &str) -> Option<String> {
-    let plist = app_path.join("Contents/Info.plist");
-    if !plist.is_file() {
-        return None;
-    }
-    let output = Command::new("/usr/bin/plutil")
-        .args(["-extract", key, "raw", "-o", "-"])
-        .arg(&plist)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!value.is_empty() && value != "null").then_some(value)
+    ApplicationMetadata::read(app_path).text(key)
 }
 
 fn cask_app_candidates(item: &Value, home: Option<&Path>) -> Vec<(PathBuf, bool)> {
@@ -1512,8 +1552,10 @@ fn detect_cask_applications(
         } else {
             "其他渠道或来源未知"
         };
-        let version = plist_value(&path, "CFBundleShortVersionString")
-            .or_else(|| plist_value(&path, "CFBundleVersion"));
+        let metadata = ApplicationMetadata::read(&path);
+        let version = metadata
+            .text("CFBundleShortVersionString")
+            .or_else(|| metadata.text("CFBundleVersion"));
         detected.push(DetectedApplication {
             name: path
                 .file_stem()
@@ -1522,7 +1564,7 @@ fn detect_cask_applications(
                 .to_string(),
             path: path.to_string_lossy().to_string(),
             version,
-            bundle_id: plist_value(&path, "CFBundleIdentifier"),
+            bundle_id: metadata.text("CFBundleIdentifier"),
             source: source.to_string(),
             brew_managed,
         });
@@ -1587,19 +1629,24 @@ fn scan_other_applications(value: &Value) -> Vec<LocalApplication> {
         .into_iter()
         .filter(|path| !managed_paths.contains(path))
         .filter(|path| !is_mac_app_store_application(path))
-        .map(|path| LocalApplication {
-            name: plist_value(&path, "CFBundleDisplayName")
-                .or_else(|| plist_value(&path, "CFBundleName"))
-                .or_else(|| {
-                    path.file_stem()
-                        .and_then(|name| name.to_str())
-                        .map(ToString::to_string)
-                })
-                .unwrap_or_else(|| "未命名应用".to_string()),
-            version: plist_value(&path, "CFBundleShortVersionString")
-                .or_else(|| plist_value(&path, "CFBundleVersion")),
-            bundle_id: plist_value(&path, "CFBundleIdentifier"),
-            path: path.to_string_lossy().to_string(),
+        .map(|path| {
+            let metadata = ApplicationMetadata::read(&path);
+            LocalApplication {
+                name: metadata
+                    .text("CFBundleDisplayName")
+                    .or_else(|| metadata.text("CFBundleName"))
+                    .or_else(|| {
+                        path.file_stem()
+                            .and_then(|name| name.to_str())
+                            .map(ToString::to_string)
+                    })
+                    .unwrap_or_else(|| "未命名应用".to_string()),
+                version: metadata
+                    .text("CFBundleShortVersionString")
+                    .or_else(|| metadata.text("CFBundleVersion")),
+                bundle_id: metadata.text("CFBundleIdentifier"),
+                path: path.to_string_lossy().to_string(),
+            }
         })
         .collect::<Vec<_>>();
     applications.sort_by_key(|app| app.name.to_lowercase());
@@ -1820,29 +1867,33 @@ struct NetworkProbe {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct NetworkProbeTarget {
+struct NetworkProbeTarget<'a> {
     label: &'static str,
-    url: &'static str,
+    url: &'a str,
     head_only: bool,
+    allow_auth_challenge: bool,
 }
 
-fn network_probe_targets(configuration: &NetworkConfiguration) -> Vec<NetworkProbeTarget> {
+fn network_probe_targets(configuration: &NetworkConfiguration) -> Vec<NetworkProbeTarget<'static>> {
     match configuration.effective_mode {
         EffectiveNetworkMode::Mirror => vec![
             NetworkProbeTarget {
                 label: "镜像 API",
                 url: "https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api/formula.jws.json",
                 head_only: true,
+                allow_auth_challenge: false,
             },
             NetworkProbeTarget {
                 label: "镜像 bottle",
                 url: "https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/",
                 head_only: true,
+                allow_auth_challenge: false,
             },
             NetworkProbeTarget {
                 label: "镜像 Git",
-                url: "https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git/",
-                head_only: true,
+                url: "https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git/info/refs?service=git-upload-pack",
+                head_only: false,
+                allow_auth_challenge: false,
             },
         ],
         EffectiveNetworkMode::Direct | EffectiveNetworkMode::SystemProxy => vec![
@@ -1850,16 +1901,19 @@ fn network_probe_targets(configuration: &NetworkConfiguration) -> Vec<NetworkPro
                 label: "Homebrew API",
                 url: "https://formulae.brew.sh/api/formula.jws.json",
                 head_only: true,
+                allow_auth_challenge: false,
             },
             NetworkProbeTarget {
                 label: "GitHub",
-                url: "https://github.com/Homebrew/brew",
-                head_only: true,
+                url: "https://github.com/Homebrew/brew.git/info/refs?service=git-upload-pack",
+                head_only: false,
+                allow_auth_challenge: false,
             },
             NetworkProbeTarget {
                 label: "GHCR",
                 url: "https://ghcr.io/v2/",
                 head_only: false,
+                allow_auth_challenge: true,
             },
         ],
     }
@@ -1877,6 +1931,9 @@ fn probe_network_target(
         "--show-error",
         "--output",
         "/dev/null",
+        "--location",
+        "--write-out",
+        "%{http_code}",
         "--connect-timeout",
         NETWORK_PROBE_CONNECT_TIMEOUT_SECONDS,
         "--max-time",
@@ -1888,7 +1945,15 @@ fn probe_network_target(
     let output = command.arg(target.url).output();
     let latency_ms = started.elapsed().as_millis().max(1) as u64;
     match output {
-        Ok(output) if output.status.success() => Ok(latency_ms),
+        Ok(output) if output.status.success() => {
+            let status = String::from_utf8_lossy(&output.stdout);
+            let code = status.trim().parse::<u16>().unwrap_or(0);
+            if (200..300).contains(&code) || (target.allow_auth_challenge && code == 401) {
+                Ok(latency_ms)
+            } else {
+                Err(format!("请求被拒绝或服务异常（HTTP {code:03}）"))
+            }
+        }
         Ok(output) => {
             Err(connection_failure_reason(&String::from_utf8_lossy(&output.stderr)).to_string())
         }
@@ -3144,8 +3209,12 @@ fn outdated_packages_for_path(
     mode: NetworkMode,
 ) -> Result<Vec<OutdatedPackage>, String> {
     let output = command_output(&brew_path, &["outdated", "--json=v2"], mode)?;
+    parse_outdated_packages(&output)
+}
+
+fn parse_outdated_packages(output: &str) -> Result<Vec<OutdatedPackage>, String> {
     let value: Value =
-        serde_json::from_str(&output).map_err(|err| format!("可更新列表解析失败：{err}"))?;
+        serde_json::from_str(output).map_err(|err| format!("可更新列表解析失败：{err}"))?;
     let mut packages = Vec::new();
     if let Some(formulae) = value.get("formulae").and_then(Value::as_array) {
         for item in formulae {
@@ -3183,9 +3252,16 @@ fn outdated_packages_for_path(
                     kind: PackageKind::Cask,
                     current_version: item
                         .get("installed_versions")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
+                        .map(|value| match value {
+                            Value::Array(items) => items
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            Value::String(version) => version.clone(),
+                            _ => String::new(),
+                        })
+                        .unwrap_or_default(),
                     latest_version: item
                         .get("current_version")
                         .and_then(Value::as_str)
@@ -3335,11 +3411,12 @@ fn log_progress(
         );
     }
 
-    if lower.contains("downloading") || percentage_from_line(line).is_some() {
+    if lower.contains("downloading")
+        || lower.contains("fetching downloads")
+        || percentage_from_line(line).is_some()
+    {
         let download_percent = percentage_from_line(line);
-        let progress = download_percent
-            .map(|value| 24 + ((value as u16 * 46) / 100) as u8)
-            .or(Some(24));
+        let progress = download_percent.map(|value| 24 + ((value as u16 * 46) / 100) as u8);
         let item = line
             .split_once("Downloading")
             .map(|(_, value)| value.trim().trim_start_matches(':').trim().to_string())
@@ -3456,7 +3533,7 @@ fn record_download_activity(
 ) -> Result<(), String> {
     let at = now_ms();
     let activity_label = if completed_file {
-        "一个下载已完成，正在继续处理".to_string()
+        "下载临时文件已变化，正在继续处理".to_string()
     } else {
         "持续收到下载数据".to_string()
     };
@@ -3470,6 +3547,14 @@ fn record_download_activity(
             .get_mut(operation_id)
             .ok_or_else(|| "操作记录不存在".to_string())?;
         operation.last_activity_at = at;
+        // Cache observations establish activity, never the HTTP Content-Length.
+        // A total parsed from a previous bottle must not describe this file.
+        operation.total_bytes = None;
+        if snapshot.active_file.is_some() && !completed_file {
+            operation.phase = OperationPhase::Downloading;
+            operation.phase_label = "正在下载".to_string();
+            operation.progress = None;
+        }
         operation.transfer_bytes_per_second = bytes_per_second;
         operation.downloaded_bytes = snapshot.active_file_bytes;
         operation.activity_label = Some(activity_label.clone());
@@ -3481,10 +3566,13 @@ fn record_download_activity(
     app.emit(
         "brew-operation",
         OperationEvent {
+            reset_transfer: true,
             operation_id: operation_id.to_string(),
             status,
-            phase: None,
-            phase_label: None,
+            phase: (snapshot.active_file.is_some() && !completed_file)
+                .then_some(OperationPhase::Downloading),
+            phase_label: (snapshot.active_file.is_some() && !completed_file)
+                .then_some("正在下载".to_string()),
             progress: None,
             current_item: snapshot.active_file.clone(),
             network_issue: None,
@@ -3654,10 +3742,42 @@ fn execute_queued_brew_command(app: &AppHandle, command: QueuedBrewCommand) {
     } else {
         network_configuration_for_mode(network_mode)
     };
+    let verification_targets = match operation_verification::targets(
+        &action,
+        target.as_ref(),
+        &brew_path,
+        &network_configuration,
+    ) {
+        Ok(targets) => targets,
+        Err(message) => {
+            let _ = push_operation_log(
+                app,
+                &operation_id,
+                OperationLog {
+                    stream: "stderr".to_string(),
+                    line: message,
+                    at: now_ms(),
+                },
+            );
+            let _ = finish_operation(app, &operation_id, OperationStatus::Failed, None);
+            return;
+        }
+    };
+    if app
+        .state::<AppState>()
+        .cancel_requested
+        .lock()
+        .map(|requests| requests.contains(&operation_id))
+        .unwrap_or(false)
+    {
+        let _ = finish_operation(app, &operation_id, OperationStatus::Cancelled, None);
+        return;
+    }
     let mut brew = brew_command_for_configuration(&brew_path, &network_configuration);
     brew.process_group(0);
     let mut child = match brew
         .args(&args)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -3768,7 +3888,8 @@ fn execute_queued_brew_command(app: &AppHandle, command: QueuedBrewCommand) {
         let _ = finish_operation(app, &operation_id, OperationStatus::Cancelled, exit_code);
         return;
     }
-    if exit_code == Some(0) {
+    let mut verified = true;
+    if exit_code == Some(0) && !verification_targets.is_empty() {
         let _ = update_operation_progress(
             app,
             &operation_id,
@@ -3777,8 +3898,32 @@ fn execute_queued_brew_command(app: &AppHandle, command: QueuedBrewCommand) {
             Some(97),
             None,
         );
+        let result = operation_verification::verify(
+            &brew_path,
+            &network_configuration,
+            &verification_targets,
+            matches!(action, BrewAction::Upgrade | BrewAction::UpgradeAll),
+        );
+        verified = result.is_ok();
+        let _ = push_operation_log(
+            app,
+            &operation_id,
+            OperationLog {
+                stream: if verified { "stdout" } else { "stderr" }.to_string(),
+                line: result.unwrap_or_else(|message| message),
+                at: now_ms(),
+            },
+        );
     }
-    let final_status = if exit_code == Some(0) {
+    let cancelled_during_verification = app
+        .state::<AppState>()
+        .cancel_requested
+        .lock()
+        .map(|requests| requests.contains(&operation_id))
+        .unwrap_or(false);
+    let final_status = if cancelled_during_verification {
+        OperationStatus::Cancelled
+    } else if exit_code == Some(0) && verified {
         OperationStatus::Succeeded
     } else {
         OperationStatus::Failed
@@ -3854,6 +3999,7 @@ fn update_operation_status(
         operation.last_activity_at = now_ms();
     }
     let event = OperationEvent {
+        reset_transfer: false,
         operation_id: operation_id.to_string(),
         status,
         phase: None,
@@ -3899,6 +4045,7 @@ fn update_operation_network_route(
     app.emit(
         "brew-operation",
         OperationEvent {
+            reset_transfer: false,
             operation_id: operation_id.to_string(),
             status,
             phase: None,
@@ -3937,6 +4084,7 @@ fn mark_operation_network_issue(app: &AppHandle, operation_id: &str) -> Result<(
     app.emit(
         "brew-operation",
         OperationEvent {
+            reset_transfer: false,
             operation_id: operation_id.to_string(),
             status,
             phase: None,
@@ -3990,6 +4138,7 @@ fn update_operation_progress(
     app.emit(
         "brew-operation",
         OperationEvent {
+            reset_transfer: false,
             operation_id: operation_id.to_string(),
             status,
             phase: Some(phase),
@@ -4019,6 +4168,7 @@ fn push_operation_log(
 ) -> Result<(), String> {
     let (phase, phase_label, progress, current_item, network_issue) = log_progress(&log.line);
     let transfer_sizes = transfer_sizes_from_line(&log.line);
+    let reset_transfer = current_item.is_some() && phase == Some(OperationPhase::Downloading);
     let state = app.state::<AppState>();
     let status = {
         let mut operations = state
@@ -4041,11 +4191,18 @@ fn push_operation_log(
         if let Some(value) = phase_label.as_ref() {
             operation.phase_label = value.clone();
         }
-        if let Some(value) = progress {
+        if phase == Some(OperationPhase::Downloading) {
+            operation.progress = progress;
+        } else if let Some(value) = progress {
             operation.progress = Some(value);
         }
         if let Some(value) = current_item.as_ref() {
             operation.current_item = Some(value.clone());
+        }
+        if reset_transfer {
+            operation.downloaded_bytes = None;
+            operation.total_bytes = None;
+            operation.transfer_bytes_per_second = None;
         }
         if let Some((downloaded, total)) = transfer_sizes {
             operation.downloaded_bytes = Some(downloaded);
@@ -4055,6 +4212,7 @@ fn push_operation_log(
         operation.status.clone()
     };
     let event = OperationEvent {
+        reset_transfer,
         operation_id: operation_id.to_string(),
         status,
         phase,
@@ -4115,6 +4273,7 @@ fn finish_operation(
         operation.activity_label = Some(operation.phase_label.clone());
     }
     let event = OperationEvent {
+        reset_transfer: true,
         operation_id: operation_id.to_string(),
         status: status.clone(),
         phase: Some(match &status {
@@ -4249,26 +4408,6 @@ mod tests {
         assert!(validate_search_text("谷歌浏览器").is_ok());
         assert!(validate_token("微信").is_err());
         assert!(validate_token("wechat;rm").is_err());
-    }
-
-    #[test]
-    fn rejects_shell_injection_before_argv_construction() {
-        for token in [
-            "wget;open /Applications",
-            "wget && whoami",
-            "$(whoami)",
-            "`whoami`",
-            "wget\nupdate",
-        ] {
-            let result = command_for_action(
-                &BrewAction::Install,
-                Some(&BrewTarget {
-                    token: token.to_string(),
-                    kind: PackageKind::Formula,
-                }),
-            );
-            assert!(result.is_err(), "unsafe token reached argv: {token:?}");
-        }
     }
 
     #[test]
@@ -4465,9 +4604,12 @@ tcp4 0 0 127.0.0.1.7892 *.* LISTEN 0 0 131072 131072 wandacloudCore:1115
 tcp4 0 0 127.0.0.1.7892 127.0.0.1.64929 ESTABLISHED 0 0 wandacloudCore:1115
 tcp4 0 0 127.0.0.1.27060 *.* LISTEN 0 0 131072 131072 steam_osx:51338
 tcp6 0 0 ::1.6153 *.* LISTEN 0 0 131072 131072 mihomo:2200
+tcp4 0 0 127.0.0.1.1082 *.* LISTEN 0 0 131072 131072 MacPacketTunnel:55814
+tcp6 0 0 ::1.1082 *.* LISTEN 0 0 131072 131072 MacPacketTunnel:55814
+tcp4 0 0 192.168.2.1.1082 *.* LISTEN 0 0 131072 131072 MacPacketTunnel:55814
 tcp4 0 0 198.18.0.1.50592 *.* LISTEN 0 0 131072 131072 wandacloudCore:1115
 "#;
-        assert_eq!(parse_loopback_proxy_ports(output), vec![6153, 7892]);
+        assert_eq!(parse_loopback_proxy_ports(output), vec![1082, 6153, 7892]);
     }
 
     #[test]
@@ -4534,94 +4676,6 @@ tcp4 0 0 198.18.0.1.50592 *.* LISTEN 0 0 131072 131072 wandacloudCore:1115
     }
 
     #[test]
-    fn mirror_network_settings_are_child_process_scoped() {
-        let tracked_keys = [
-            "HOMEBREW_API_DOMAIN",
-            "HOMEBREW_BOTTLE_DOMAIN",
-            "HOMEBREW_BREW_GIT_REMOTE",
-            "HTTP_PROXY",
-            "HTTPS_PROXY",
-        ];
-        let before = tracked_keys
-            .iter()
-            .map(|key| ((*key).to_string(), std::env::var_os(key)))
-            .collect::<HashMap<_, _>>();
-        let configuration = network_configuration_for_effective_mode(
-            NetworkMode::Mirror,
-            EffectiveNetworkMode::Mirror,
-            None,
-            "test",
-        );
-        let mut command = Command::new("/usr/bin/true");
-        apply_network_configuration(&mut command, &configuration);
-        let child_environment = command
-            .get_envs()
-            .map(|(key, value)| {
-                (
-                    key.to_string_lossy().into_owned(),
-                    value.map(|item| item.to_string_lossy().into_owned()),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-
-        assert_eq!(
-            child_environment
-                .get("HOMEBREW_API_DOMAIN")
-                .and_then(Option::as_deref),
-            Some(TUNA_API_DOMAIN)
-        );
-        assert_eq!(
-            child_environment
-                .get("HOMEBREW_BOTTLE_DOMAIN")
-                .and_then(Option::as_deref),
-            Some(TUNA_BOTTLE_DOMAIN)
-        );
-        assert_eq!(
-            child_environment
-                .get("HOMEBREW_BREW_GIT_REMOTE")
-                .and_then(Option::as_deref),
-            Some(TUNA_BREW_GIT_REMOTE)
-        );
-        assert_eq!(child_environment.get("HTTP_PROXY"), Some(&None));
-        assert_eq!(child_environment.get("HTTPS_PROXY"), Some(&None));
-        for key in tracked_keys {
-            assert_eq!(std::env::var_os(key), before[key]);
-        }
-    }
-
-    #[test]
-    fn direct_network_mode_clears_inherited_routes_for_child_only() {
-        let before_proxy = std::env::var_os("HTTPS_PROXY");
-        let configuration = network_configuration_for_effective_mode(
-            NetworkMode::Official,
-            EffectiveNetworkMode::Direct,
-            None,
-            "test",
-        );
-        let mut command = Command::new("/usr/bin/true");
-        apply_network_configuration(&mut command, &configuration);
-        let child_environment = command
-            .get_envs()
-            .map(|(key, value)| {
-                (
-                    key.to_string_lossy().into_owned(),
-                    value.map(|item| item.to_string_lossy().into_owned()),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-
-        assert_eq!(child_environment.get("HTTPS_PROXY"), Some(&None));
-        assert_eq!(child_environment.get("HOMEBREW_API_DOMAIN"), Some(&None));
-        assert_eq!(
-            child_environment
-                .get("HOMEBREW_DOWNLOAD_CONCURRENCY")
-                .and_then(Option::as_deref),
-            Some("2")
-        );
-        assert_eq!(std::env::var_os("HTTPS_PROXY"), before_proxy);
-    }
-
-    #[test]
     fn coverage_probe_checks_three_core_endpoints_per_route() {
         let direct = network_configuration_for_effective_mode(
             NetworkMode::Official,
@@ -4647,7 +4701,75 @@ tcp4 0 0 198.18.0.1.50592 *.* LISTEN 0 0 131072 131072 wandacloudCore:1115
         );
         let mirror_targets = network_probe_targets(&mirror);
         assert_eq!(mirror_targets.len(), 3);
-        assert!(mirror_targets.iter().all(|target| target.head_only));
+        for targets in [&direct_targets, &mirror_targets] {
+            let git = &targets[1 + usize::from(targets[0].label == "镜像 API")];
+            assert!(git.url.ends_with("/info/refs?service=git-upload-pack"));
+            assert!(!git.head_only);
+            assert!(!git.allow_auth_challenge);
+        }
+        assert!(direct_targets[2].allow_auth_challenge);
+        assert!(mirror_targets
+            .iter()
+            .all(|target| !target.allow_auth_challenge));
+    }
+
+    #[test]
+    fn coverage_probe_rejects_http_errors_even_when_curl_exits_successfully() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpListener;
+
+        let configuration = network_configuration_for_mode(NetworkMode::Official);
+        for (status, allow_auth_challenge, redirect, expected) in [
+            (200, false, false, true),
+            (204, false, false, true),
+            (403, false, false, false),
+            (404, false, false, false),
+            (500, false, false, false),
+            (401, false, false, false),
+            (401, true, false, true),
+            (403, false, true, false),
+            (200, false, true, true),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/probe", listener.local_addr().unwrap());
+            let server = std::thread::spawn(move || {
+                for index in 0..if redirect { 2 } else { 1 } {
+                    let (mut socket, _) = listener.accept().unwrap();
+                    let mut reader = BufReader::new(socket.try_clone().unwrap());
+                    let mut line = String::new();
+                    loop {
+                        line.clear();
+                        if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                            break;
+                        }
+                    }
+                    let response = if redirect && index == 0 {
+                        "HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+                    } else {
+                        format!("HTTP/1.1 {status} Fixture\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    };
+                    socket.write_all(response.as_bytes()).unwrap();
+                }
+            });
+            let result = probe_network_target(
+                &configuration,
+                NetworkProbeTarget {
+                    label: "fixture",
+                    url: &url,
+                    head_only: false,
+                    allow_auth_challenge,
+                },
+            );
+            server.join().unwrap();
+            assert_eq!(
+                result.is_ok(),
+                expected,
+                "HTTP {status}, redirect={redirect}: {result:?}"
+            );
+            if !expected {
+                assert!(result.unwrap_err().contains(&format!("HTTP {status}")));
+            }
+        }
     }
 
     #[test]
@@ -4685,6 +4807,89 @@ tcp4 0 0 198.18.0.1.50592 *.* LISTEN 0 0 131072 131072 wandacloudCore:1115
         );
         assert_eq!(transfer_sizes_from_line("Downloading bottles 3/3"), None);
         assert_eq!(transfer_sizes_from_line("Downloading ######## 57.8%"), None);
+    }
+
+    #[test]
+    fn outdated_cask_list_keeps_real_installed_versions_from_arrays_or_legacy_strings() {
+        let packages = parse_outdated_packages(r#"{"formulae":[{"name":"llvm","installed_versions":["23.1.3_2"],"current_version":"23.1.4"}],"casks":[{"name":"temurin@17","installed_versions":["17.0.19,10"],"current_version":"17.0.20.1,1"},{"name":"legacy","installed_versions":"1","current_version":"2"}]}"#).unwrap();
+        assert_eq!(packages[0].current_version, "23.1.3_2");
+        assert_eq!(packages[1].current_version, "17.0.19,10");
+        assert_eq!(packages[2].current_version, "1");
+    }
+
+    #[test]
+    fn selected_route_overrides_a_persisted_git_mirror_without_writing_config() {
+        let root = std::env::temp_dir().join(format!("brewdesk-git-route-{}", Uuid::new_v4()));
+        assert!(Command::new("/usr/bin/git")
+            .args(["init", "--quiet"])
+            .arg(&root)
+            .status()
+            .unwrap()
+            .success());
+        let config_path = root.join(".git/config");
+        for (mode, configured, expected) in [
+            (
+                NetworkMode::Official,
+                TUNA_BREW_GIT_REMOTE,
+                "https://github.com/Homebrew/brew.git",
+            ),
+            (
+                NetworkMode::Mirror,
+                "https://github.com/Homebrew/brew.git",
+                TUNA_BREW_GIT_REMOTE,
+            ),
+        ] {
+            let contents = format!("[remote \"origin\"]\n\turl = {configured}\n");
+            fs::write(&config_path, &contents).unwrap();
+            let mut command = Command::new("/usr/bin/git");
+            apply_network_environment(&mut command, mode);
+            let output = command
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .arg("-C")
+                .arg(&root)
+                .args(["remote", "get-url", "origin"])
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), expected);
+            assert_eq!(fs::read_to_string(&config_path).unwrap(), contents);
+            assert!(command
+                .get_envs()
+                .any(|(key, value)| key == "HOMEBREW_BREW_GIT_REMOTE" && value.is_none()));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn git_helper_routes_after_the_environment_is_filtered_and_preserves_argv() {
+        let root = std::env::temp_dir().join(format!("brewdesk git helper {}", Uuid::new_v4()));
+        assert!(Command::new("/usr/bin/git")
+            .args(["init", "--quiet"])
+            .arg(&root)
+            .status()
+            .unwrap()
+            .success());
+        let contents = format!("[remote \"origin\"]\n\turl = {TUNA_BREW_GIT_REMOTE}\n");
+        let path = root.join(".git/config");
+        fs::write(&path, &contents).unwrap();
+        // Homebrew drops GIT_CONFIG_COUNT/KEY/VALUE from its initial environment.
+        // Only the explicitly supported HOMEBREW_* bridge reaches the helper.
+        let output = Command::new(bundled_git_wrapper_path())
+            .env_clear()
+            .env("HOMEBREW_BREWDESK_GIT_ROUTE", "official")
+            .arg("-C")
+            .arg(&root)
+            .args(["remote", "get-url", "origin"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "https://github.com/Homebrew/brew.git"
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), contents);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -4784,31 +4989,6 @@ tcp4 0 0 198.18.0.1.50592 *.* LISTEN 0 0 131072 131072 wandacloudCore:1115
     }
 
     #[test]
-    fn unconfirmed_cask_application_is_not_treated_as_homebrew_managed() {
-        let root = std::env::temp_dir().join(format!("brewdesk-origin-test-{}", Uuid::new_v4()));
-        let foreign_app = root.join("Foreign.app");
-        fs::create_dir_all(&foreign_app).unwrap();
-        let json = serde_json::json!({
-            "casks": [{
-                "artifacts": [{
-                    "app": ["Foreign.app"],
-                    "target": foreign_app.to_string_lossy()
-                }]
-            }]
-        })
-        .to_string();
-
-        let detected = detect_cask_applications(&json, false).unwrap();
-        let application = detected
-            .iter()
-            .find(|item| item.path == foreign_app.to_string_lossy())
-            .unwrap();
-        assert!(!application.brew_managed);
-        assert_eq!(application.source, "其他渠道或来源未知");
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
     fn finder_reveal_accepts_only_existing_absolute_paths() {
         assert!(validated_reveal_path("relative/path").is_err());
         assert!(validated_reveal_path("/definitely/missing/brewdesk/path").is_err());
@@ -4844,5 +5024,151 @@ tcp4 0 0 198.18.0.1.50592 *.* LISTEN 0 0 131072 131072 wandacloudCore:1115
         assert!(queue.worker_running);
         assert!(queue.next().is_none());
         assert!(!queue.worker_running);
+    }
+    #[test]
+    fn rejects_shell_injection_before_argv_construction() {
+        for token in [
+            "wget;open /Applications",
+            "wget && whoami",
+            "$(whoami)",
+            "`whoami`",
+            "wget\nupdate",
+        ] {
+            let result = command_for_action(
+                &BrewAction::Install,
+                Some(&BrewTarget {
+                    token: token.to_string(),
+                    kind: PackageKind::Formula,
+                }),
+            );
+            assert!(result.is_err(), "unsafe token reached argv: {token:?}");
+        }
+    }
+
+    #[test]
+    fn mirror_network_settings_are_child_process_scoped() {
+        let tracked_keys = [
+            "HOMEBREW_API_DOMAIN",
+            "HOMEBREW_BOTTLE_DOMAIN",
+            "HOMEBREW_BREW_GIT_REMOTE",
+            "HOMEBREW_GIT_PATH",
+            "HOMEBREW_BREWDESK_GIT_ROUTE",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+        ];
+        let before = tracked_keys
+            .iter()
+            .map(|key| ((*key).to_string(), std::env::var_os(key)))
+            .collect::<HashMap<_, _>>();
+        let configuration = network_configuration_for_effective_mode(
+            NetworkMode::Mirror,
+            EffectiveNetworkMode::Mirror,
+            None,
+            "test",
+        );
+        let mut command = Command::new("/usr/bin/true");
+        apply_network_configuration(&mut command, &configuration);
+        let child_environment = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|item| item.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        assert_eq!(
+            child_environment
+                .get("HOMEBREW_API_DOMAIN")
+                .and_then(Option::as_deref),
+            Some(TUNA_API_DOMAIN)
+        );
+        assert_eq!(
+            child_environment
+                .get("HOMEBREW_BOTTLE_DOMAIN")
+                .and_then(Option::as_deref),
+            Some(TUNA_BOTTLE_DOMAIN)
+        );
+        assert_eq!(
+            child_environment
+                .get("HOMEBREW_BREW_GIT_REMOTE")
+                .and_then(Option::as_deref),
+            None
+        );
+        assert_eq!(
+            child_environment
+                .get("HOMEBREW_BREWDESK_GIT_ROUTE")
+                .and_then(Option::as_deref),
+            Some("mirror")
+        );
+        assert_eq!(
+            child_environment
+                .get("HOMEBREW_GIT_PATH")
+                .and_then(Option::as_deref),
+            bundled_git_wrapper_path().to_str()
+        );
+        assert_eq!(child_environment.get("HTTP_PROXY"), Some(&None));
+        assert_eq!(child_environment.get("HTTPS_PROXY"), Some(&None));
+        for key in tracked_keys {
+            assert_eq!(std::env::var_os(key), before[key]);
+        }
+    }
+
+    #[test]
+    fn direct_network_mode_clears_inherited_routes_for_child_only() {
+        let before_proxy = std::env::var_os("HTTPS_PROXY");
+        let configuration = network_configuration_for_effective_mode(
+            NetworkMode::Official,
+            EffectiveNetworkMode::Direct,
+            None,
+            "test",
+        );
+        let mut command = Command::new("/usr/bin/true");
+        apply_network_configuration(&mut command, &configuration);
+        let child_environment = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|item| item.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        assert_eq!(child_environment.get("HTTPS_PROXY"), Some(&None));
+        assert_eq!(child_environment.get("HOMEBREW_API_DOMAIN"), Some(&None));
+        assert_eq!(
+            child_environment
+                .get("HOMEBREW_DOWNLOAD_CONCURRENCY")
+                .and_then(Option::as_deref),
+            Some("2")
+        );
+        assert_eq!(std::env::var_os("HTTPS_PROXY"), before_proxy);
+    }
+
+    #[test]
+    fn unconfirmed_cask_application_is_not_treated_as_homebrew_managed() {
+        let root = std::env::temp_dir().join(format!("brewdesk-origin-test-{}", Uuid::new_v4()));
+        let foreign_app = root.join("Foreign.app");
+        fs::create_dir_all(&foreign_app).unwrap();
+        let json = serde_json::json!({
+            "casks": [{
+                "artifacts": [{
+                    "app": ["Foreign.app"],
+                    "target": foreign_app.to_string_lossy()
+                }]
+            }]
+        })
+        .to_string();
+
+        let detected = detect_cask_applications(&json, false).unwrap();
+        let application = detected
+            .iter()
+            .find(|item| item.path == foreign_app.to_string_lossy())
+            .unwrap();
+        assert!(!application.brew_managed);
+        assert_eq!(application.source, "其他渠道或来源未知");
+        fs::remove_dir_all(root).unwrap();
     }
 }

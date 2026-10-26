@@ -186,6 +186,7 @@ export interface BrewOperation {
 }
 
 export interface OperationEvent {
+  resetTransfer?: boolean;
   operationId: string;
   status: OperationStatus;
   phase?: OperationPhase | null;

@@ -66,6 +66,7 @@ fn prepare_external_tauri_context() -> io::Result<PathBuf> {
     )?;
     copy_regular_tree(&source.join("capabilities"), &context.join("capabilities"))?;
     copy_regular_tree(&source.join("icons"), &context.join("icons"))?;
+    copy_regular_tree(&source.join("resources"), &context.join("resources"))?;
     copy_regular_file(&source.join("../index.html"), &out_dir.join("index.html"))?;
 
     Ok(context)
@@ -75,6 +76,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../index.html");
     println!("cargo:rerun-if-changed=capabilities");
     println!("cargo:rerun-if-changed=icons");
+    println!("cargo:rerun-if-changed=resources");
     println!("cargo:rerun-if-changed=tauri.conf.json");
 
     let context = prepare_external_tauri_context()

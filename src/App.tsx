@@ -23,22 +23,25 @@ import {
   Upload,
   X
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { brewApi } from "./brewApi";
 import { localizeDescription } from "./localDescription";
 import {
   addChineseDescriptions,
+  localizeCachedDescriptions,
   getTranslationCacheStats,
   getTranslationStatus,
   resetTranslationStatus
 } from "./descriptionTranslation";
+import brewDeskIcon from "../design/brewdesk-icon-liquid-glass.png";
 import {
   invalidateOutdatedCache,
   readOutdatedCache,
   writeOutdatedCache
 } from "./outdatedCache";
-import { hasMissingCaskAppSource } from "./operationRecovery";
-import brewDeskIcon from "../design/brewdesk-icon-liquid-glass.png";
+import { hasMissingCaskAppSource, operationFailureGuidance } from "./operationRecovery";
+import { mergeOperationEvents, validTransferTotal } from "./operationState";
+import { OperationLogs } from "./OperationLogs";
 import type {
   BrewAction,
   BrewAvailability,
@@ -210,6 +213,12 @@ export default function App() {
   const [hasSearched, setHasSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const installedLoaded = useRef(false);
+  const installedRequest = useRef(0);
+  const installedInFlight = useRef(false);
+  const searchRequest = useRef(0);
+  const detailGeneration = useRef(0);
+  const mainPanel = useRef<HTMLElement>(null);
+  const scrollPositions = useRef<Partial<Record<ViewKey, number>>>({});
   const outdatedLoaded = useRef(false);
   const checkedHomebrewUpdateOperation = useRef<string | null>(null);
   const detailCache = useRef(new Map<string, PackageDetail>());
@@ -314,11 +323,17 @@ export default function App() {
 
     void brewApi
       .listenOperations((event) => {
-        if (event.status === "succeeded" && event.finishedAt) {
+        if (event.finishedAt) {
           invalidateOutdatedCache();
           setOutdatedFetchedAt(null);
           outdatedLoaded.current = false;
           installedLoaded.current = false;
+          installedRequest.current += 1;
+          installedInFlight.current = false;
+          setInstalledLoading(false);
+          detailGeneration.current += 1;
+          detailCache.current.clear();
+          detailPromises.current.clear();
         }
         operationQueue.current.push(event);
         if (operationFlushTimer.current !== null) return;
@@ -326,7 +341,7 @@ export default function App() {
           const events = operationQueue.current.splice(0);
           operationFlushTimer.current = null;
           if (events.length) {
-            setOperations((current) => events.reduce(mergeOperationEvent, current));
+            setOperations((current) => mergeOperationEvents(current, events));
           }
         }, 80);
       })
@@ -379,6 +394,13 @@ export default function App() {
       outdatedLoaded.current = false;
     }
   }, [availability?.status, availability?.brewPath]);
+
+  useLayoutEffect(() => {
+    const list = mainPanel.current?.querySelector<HTMLElement>(
+      `[data-scroll-view="${activeView}"]`
+    );
+    if (list) list.scrollTop = scrollPositions.current[activeView] ?? 0;
+  }, [activeView, installedLoading, outdatedLoading, loading]);
 
   async function refreshEnvironment() {
     setEnvironmentLoading(true);
@@ -436,16 +458,27 @@ export default function App() {
   }
 
   async function refreshInstalled() {
+    if (installedInFlight.current) return;
+    installedInFlight.current = true;
+    const requestId = ++installedRequest.current;
     setInstalledLoading(true);
     try {
       const inventory = await brewApi.installedInventory();
-      setInstalled(await addChineseDescriptions(inventory.homebrew));
+      if (requestId !== installedRequest.current) return;
+      setInstalled(localizeCachedDescriptions(inventory.homebrew));
       setOtherApplications(inventory.other);
       installedLoaded.current = true;
+      // Translation can be slow; it must not delay the usable inventory.
+      void addChineseDescriptions(inventory.homebrew).then((localized) => {
+        if (requestId === installedRequest.current) setInstalled(localized);
+      }).catch(() => undefined);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (requestId === installedRequest.current) setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setInstalledLoading(false);
+      if (requestId === installedRequest.current) {
+        setInstalledLoading(false);
+        installedInFlight.current = false;
+      }
     }
   }
 
@@ -475,49 +508,58 @@ export default function App() {
   async function submitSearch(query = searchQuery) {
     const trimmed = query.trim();
     if (trimmed.length < 2) return;
+    const requestId = ++searchRequest.current;
     setLoading(true);
     setHasSearched(true);
     setError(null);
     try {
       const response = await brewApi.searchPackages(trimmed, searchKind);
+      if (requestId !== searchRequest.current) return;
       const marked = response.items.map((pkg) => ({
         ...pkg,
         installed: installed.some((item) => item.token === pkg.token && item.kind === pkg.kind) || pkg.installed,
         outdated: outdated.some((item) => item.token === pkg.token && item.kind === pkg.kind) || pkg.outdated
       }));
-      const localizedItems = await addChineseDescriptions(marked);
-      setSearchResults(localizedItems);
-      setSearchResponse({ ...response, items: localizedItems });
+      scrollPositions.current.search = 0;
+      const initialItems = localizeCachedDescriptions(marked);
+      setSearchResults(initialItems);
+      setSearchResponse({ ...response, items: initialItems });
       setSelectedSummary(null);
       setSelectedDetail(null);
       setSelectedLocalApplication(null);
+      detailRequest.current += 1;
+      setDetailLoading(false);
+      void addChineseDescriptions(marked).then((localizedItems) => {
+        if (requestId !== searchRequest.current) return;
+        setSearchResults(localizedItems);
+        setSearchResponse({ ...response, items: localizedItems });
+      }).catch(() => undefined);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (requestId === searchRequest.current) setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (requestId === searchRequest.current) setLoading(false);
     }
   }
 
-  function loadPackageDetail(summary: PackageSummary): Promise<PackageDetail> {
+  const loadPackageDetail = useCallback((summary: PackageSummary): Promise<PackageDetail> => {
     const cacheKey = `${summary.kind}:${summary.token}`;
     const cached = detailCache.current.get(cacheKey);
     if (cached) return Promise.resolve(cached);
     const inFlight = detailPromises.current.get(cacheKey);
     if (inFlight) return inFlight;
-    const request = brewApi.packageInfo(summary.token, summary.kind).then(async (detail) => {
-      const [localizedDetail] = await addChineseDescriptions([detail]);
-      detailCache.current.set(cacheKey, localizedDetail);
-      detailPromises.current.delete(cacheKey);
+    const generation = detailGeneration.current;
+    const request = brewApi.packageInfo(summary.token, summary.kind).then((detail) => {
+      const [localizedDetail] = localizeCachedDescriptions([detail]);
+      if (generation === detailGeneration.current) detailCache.current.set(cacheKey, localizedDetail);
       return localizedDetail;
-    }, (err) => {
-      detailPromises.current.delete(cacheKey);
-      throw err;
+    }).finally(() => {
+      if (detailPromises.current.get(cacheKey) === request) detailPromises.current.delete(cacheKey);
     });
     detailPromises.current.set(cacheKey, request);
     return request;
-  }
+  }, []);
 
-  async function selectPackage(summary: PackageSummary) {
+  const selectPackage = useCallback(async (summary: PackageSummary) => {
     const requestId = ++detailRequest.current;
     setSelectedSummary(summary);
     setSelectedLocalApplication(null);
@@ -527,25 +569,28 @@ export default function App() {
     try {
       const detail = await loadPackageDetail(summary);
       if (requestId !== detailRequest.current) return;
-      setSelectedDetail({
-        ...detail,
-        installed: detail.installed || summary.installed
-      });
+      setSelectedDetail({ ...detail, installed: detail.installed || summary.installed });
+      void addChineseDescriptions([detail]).then(([localized]) => {
+        if (requestId === detailRequest.current) {
+          detailCache.current.set(`${summary.kind}:${summary.token}`, localized);
+          setSelectedDetail({ ...localized, installed: localized.installed || summary.installed });
+        }
+      }).catch(() => undefined);
     } catch (err) {
       if (requestId !== detailRequest.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       if (requestId === detailRequest.current) setDetailLoading(false);
     }
-  }
+  }, [loadPackageDetail]);
 
-  function selectLocalApplication(application: LocalApplication) {
+  const selectLocalApplication = useCallback((application: LocalApplication) => {
     detailRequest.current += 1;
     setSelectedLocalApplication(application);
     setSelectedSummary(null);
     setSelectedDetail(null);
     setDetailLoading(false);
-  }
+  }, []);
 
   async function revealInFinder(path: string) {
     setError(null);
@@ -565,9 +610,9 @@ export default function App() {
     }
   }
 
-  function requestAction(action: BrewAction, target?: BrewTarget) {
+  const requestAction = useCallback((action: BrewAction, target?: BrewTarget) => {
     setPendingAction({ action, target });
-  }
+  }, []);
 
   async function confirmAction() {
     if (!pendingAction) return;
@@ -599,6 +644,14 @@ export default function App() {
     setError(null);
     try {
       await brewApi.setBrewPath(brewPathDraft.trim());
+      installedRequest.current += 1;
+      installedInFlight.current = false;
+      installedLoaded.current = false;
+      setInstalledLoading(false);
+      searchRequest.current += 1;
+      setLoading(false);
+      detailGeneration.current += 1;
+      detailRequest.current += 1;
       invalidateOutdatedCache();
       setOutdatedFetchedAt(null);
       setOutdated([]);
@@ -664,7 +717,7 @@ export default function App() {
     }
   }
 
-  async function retryWithMirror(operation: BrewOperation) {
+  const retryWithMirror = useCallback(async (operation: BrewOperation) => {
     setNetworkLoading(true);
     setError(null);
     try {
@@ -678,7 +731,11 @@ export default function App() {
     } finally {
       setNetworkLoading(false);
     }
-  }
+  }, []);
+
+  const repairMissingCask = useCallback((operation: BrewOperation) => {
+    requestAction("repair", operation.target ?? undefined);
+  }, [requestAction]);
 
   async function cancelOperation(operation: BrewOperation) {
     setCancellingId(operation.id);
@@ -736,11 +793,15 @@ export default function App() {
               <button
                 key={item.key}
                 className={activeView === item.key ? "nav-item selected" : "nav-item"}
+                aria-current={activeView === item.key ? "page" : undefined}
                 onClick={() => {
                   if (item.key !== activeView) {
+                    const list = mainPanel.current?.querySelector<HTMLElement>(`[data-scroll-view="${activeView}"]`);
+                    if (list) scrollPositions.current[activeView] = list.scrollTop;
                     detailRequest.current += 1;
                     setSelectedSummary(null);
                     setSelectedDetail(null);
+                    setSelectedLocalApplication(null);
                     setDetailLoading(false);
                   }
                   setActiveView(item.key);
@@ -782,6 +843,8 @@ export default function App() {
             className="searchbar"
             onSubmit={(event) => {
               event.preventDefault();
+              const list = mainPanel.current?.querySelector<HTMLElement>(`[data-scroll-view="${activeView}"]`);
+              if (list) scrollPositions.current[activeView] = list.scrollTop;
               setActiveView("search");
               void submitSearch();
             }}
@@ -793,7 +856,11 @@ export default function App() {
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="搜索 Homebrew 包"
             />
-            <select value={searchKind} onChange={(event) => setSearchKind(event.target.value as SearchKind)}>
+            <select value={searchKind} onChange={(event) => {
+              searchRequest.current += 1;
+              setLoading(false);
+              setSearchKind(event.target.value as SearchKind);
+            }}>
               <option value="both">全部</option>
               <option value="cask">cask</option>
               <option value="formula">formula</option>
@@ -837,7 +904,13 @@ export default function App() {
         ) : null}
 
         <div className={detailVisible ? "content-grid" : "content-grid single"}>
-          <section className="main-panel">
+          <section className="main-panel" ref={mainPanel} onScrollCapture={(event) => {
+            const node = event.target as HTMLElement;
+            const view = node.dataset.scrollView;
+            if (node.isConnected && views.some((item) => item.key === view)) {
+              scrollPositions.current[view as ViewKey] = node.scrollTop;
+            }
+          }}>
             <PanelHeader
               activeView={activeView}
               loading={currentLoading}
@@ -888,8 +961,8 @@ export default function App() {
               <OperationsList
                 operations={operations}
                 retrying={networkLoading}
-                onRetryWithMirror={(operation) => void retryWithMirror(operation)}
-                onRepairMissingCask={(operation) => requestAction("repair", operation.target ?? undefined)}
+                onRetryWithMirror={retryWithMirror}
+                onRepairMissingCask={repairMissingCask}
                 cancellingId={cancellingId}
                 onCancel={setPendingCancel}
               />
@@ -1181,50 +1254,13 @@ function ActivityDrawer({
             </div>
           ))}
         </div>
-        <div className="log-box compact">
-          {selected?.logs.length ? (
-            selected.logs.slice(-6).map((log, index) => (
-              <p key={`${selected.id}-dock-${index}`} className={log.stream}>
-                <b>{log.stream}</b>
-                <span>{log.line}</span>
-              </p>
-            ))
-          ) : (
-            <p className="stdout">
-              <b>system</b>
-              <span>执行安装、升级、刷新源数据或健康检查后，会在这里显示实时 stdout/stderr。</span>
-            </p>
-          )}
-        </div>
+        <OperationLogs logs={selected?.logs ?? emptyLogs} compact limit={6}
+          emptyMessage="执行安装、升级、刷新源数据或健康检查后，会在这里显示实时 stdout/stderr。" />
       </div>
     </section>
   );
 }
 
-function mergeOperationEvent(operations: BrewOperation[], event: OperationEvent) {
-  return operations.map((operation) => {
-    if (operation.id !== event.operationId) return operation;
-    return {
-      ...operation,
-      status: event.status,
-      phase: event.phase ?? operation.phase,
-      phaseLabel: event.phaseLabel ?? operation.phaseLabel,
-      progress: event.progress ?? operation.progress,
-      currentItem: event.currentItem === undefined ? operation.currentItem : event.currentItem,
-      networkIssue: event.networkIssue ?? operation.networkIssue,
-      effectiveNetworkMode: event.effectiveNetworkMode ?? operation.effectiveNetworkMode,
-      proxyUrl: event.effectiveNetworkMode != null ? (event.proxyUrl ?? null) : operation.proxyUrl,
-      lastActivityAt: event.lastActivityAt ?? operation.lastActivityAt,
-      transferBytesPerSecond: event.transferBytesPerSecond ?? operation.transferBytesPerSecond,
-      downloadedBytes: event.downloadedBytes ?? operation.downloadedBytes,
-      totalBytes: event.totalBytes ?? operation.totalBytes,
-      activityLabel: event.activityLabel ?? operation.activityLabel,
-      exitCode: event.exitCode ?? operation.exitCode,
-      finishedAt: event.finishedAt ?? operation.finishedAt,
-      logs: event.log ? [...operation.logs.slice(-999), event.log] : operation.logs
-    };
-  });
-}
 
 function PanelHeader({
   activeView,
@@ -1299,7 +1335,7 @@ function PanelHeader({
   );
 }
 
-function PackageList({
+export function PackageList({
   items,
   selected,
   loading,
@@ -1318,7 +1354,7 @@ function PackageList({
   onPreview: (item: PackageSummary) => Promise<PackageDetail>;
   onQuickSearch: (query: string) => void;
 }) {
-  if (loading) {
+  if (loading && !items.length) {
     return (
       <div className="empty-state">
         <Loader2 className="spin" size={24} />
@@ -1347,7 +1383,8 @@ function PackageList({
     );
   }
   return (
-    <div className="package-list">
+    <div className="package-list" data-scroll-view="search" aria-busy={loading}>
+      {loading ? <div className="list-refresh" role="status">正在查询，暂时保留上次结果…</div> : null}
       {items.map((item) => (
         <PackageRow
           key={`${item.kind}:${item.token}`}
@@ -1361,7 +1398,7 @@ function PackageList({
   );
 }
 
-function InstalledInventoryList({
+const InstalledInventoryList = memo(function InstalledInventoryList({
   homebrew,
   other,
   selectedPackage,
@@ -1380,7 +1417,7 @@ function InstalledInventoryList({
   onSelectApplication: (item: LocalApplication) => void;
   onPreview: (item: PackageSummary) => Promise<PackageDetail>;
 }) {
-  if (loading) {
+  if (loading && !homebrew.length && !other.length) {
     return (
       <div className="empty-state">
         <Loader2 className="spin" size={24} />
@@ -1399,7 +1436,8 @@ function InstalledInventoryList({
     );
   }
   return (
-    <div className="installed-inventory">
+    <div className="installed-inventory" data-scroll-view="installed" aria-busy={loading}>
+      {loading ? <div className="list-refresh" role="status">正在后台刷新，当前列表仍可浏览…</div> : null}
       <section className="source-group">
         <header>
           <div>
@@ -1446,9 +1484,9 @@ function InstalledInventoryList({
       </section>
     </div>
   );
-}
+});
 
-function LocalApplicationRow({
+const LocalApplicationRow = memo(function LocalApplicationRow({
   application,
   selected,
   onSelect
@@ -1477,9 +1515,9 @@ function LocalApplicationRow({
       </div>
     </button>
   );
-}
+});
 
-function PackageRow({
+const PackageRow = memo(function PackageRow({
   item,
   selected,
   onSelect,
@@ -1496,9 +1534,12 @@ function PackageRow({
   const timer = useRef<number | null>(null);
   const alive = useRef(true);
 
-  useEffect(() => () => {
-    alive.current = false;
-    if (timer.current !== null) window.clearTimeout(timer.current);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      if (timer.current !== null) window.clearTimeout(timer.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -1594,7 +1635,7 @@ function PackageRow({
       ) : null}
     </button>
   );
-}
+});
 
 function OutdatedList({
   items,
@@ -1631,7 +1672,7 @@ function OutdatedList({
     );
   }
   return (
-    <div className="package-list">
+    <div className="package-list" data-scroll-view="outdated">
       {items.map((item) => {
         const pending = bulkUpgradePending || pendingTargetKeys.has(targetKey(item) ?? "");
         return (
@@ -1672,6 +1713,8 @@ function OutdatedList({
     </div>
   );
 }
+
+const emptyLogs: BrewOperation["logs"] = [];
 
 const operationStages = [
   { phase: "preparing", label: "准备" },
@@ -1722,7 +1765,7 @@ function networkRoute(operation: BrewOperation) {
   return { label: "官方直连", detail: "未使用代理" };
 }
 
-function OperationProgress({ operation, compact = false }: { operation: BrewOperation; compact?: boolean }) {
+export function OperationProgress({ operation, compact = false }: { operation: BrewOperation; compact?: boolean }) {
   const progress = operation.progress == null ? null : Math.max(0, Math.min(100, operation.progress));
   const active = isOperationActive(operation);
   const [now, setNow] = useState(Date.now());
@@ -1744,11 +1787,12 @@ function OperationProgress({ operation, compact = false }: { operation: BrewOper
   const route = networkRoute(operation);
   const speed = formatSpeed(operation.transferBytesPerSecond);
   const downloaded = formatBytes(operation.downloadedBytes);
-  const total = formatBytes(operation.totalBytes);
+  const total = formatBytes(validTransferTotal(operation));
   const transferAmount = downloaded ? (total ? `${downloaded} / ${total}` : downloaded) : null;
   const hasFreshTransfer = active && operation.phase === "downloading" && Boolean(speed) && quietSeconds <= 10;
   const slowTransfer = hasFreshTransfer && operation.transferBytesPerSecond != null && operation.transferBytesPerSecond < 512 * 1024;
-  const liveTone = retryRemaining != null && retryRemaining > 0
+  const queued = operation.status === "queued";
+  const liveTone = queued ? "waiting" : retryRemaining != null && retryRemaining > 0
     ? "retry"
     : hasFreshTransfer
       ? slowTransfer ? "slow" : "active"
@@ -1757,7 +1801,7 @@ function OperationProgress({ operation, compact = false }: { operation: BrewOper
         : quietSeconds >= 20
           ? "waiting"
           : "active";
-  const liveTitle = retryRemaining != null && retryRemaining > 0
+  const liveTitle = queued ? "等待前面的任务完成" : retryRemaining != null && retryRemaining > 0
     ? "下载异常，等待重试"
     : hasFreshTransfer
       ? slowTransfer
@@ -1770,7 +1814,7 @@ function OperationProgress({ operation, compact = false }: { operation: BrewOper
           : active
             ? "Homebrew 正在工作"
             : statusText(operation.status);
-  const liveDetail = retryRemaining != null && retryRemaining > 0
+  const liveDetail = queued ? "已加入队列，尚未启动；不会并行修改 Homebrew。" : retryRemaining != null && retryRemaining > 0
     ? `Homebrew 将在 ${retryRemaining} 秒后自动重试`
     : active
       ? [
@@ -1852,9 +1896,30 @@ function OperationsList({
     );
   }
   return (
-    <div className="operations">
+    <div className="operations" data-scroll-view="operations">
       {operations.map((operation) => (
-        <article className="operation-card" key={operation.id}>
+        <OperationCard key={operation.id} operation={operation} retrying={retrying}
+          onRetryWithMirror={onRetryWithMirror} onRepairMissingCask={onRepairMissingCask}
+          cancelling={cancellingId === operation.id} onCancel={onCancel} />
+      ))}
+    </div>
+  );
+}
+
+
+const OperationCard = memo(function OperationCard({
+  operation, retrying, onRetryWithMirror, onRepairMissingCask, cancelling, onCancel
+}: {
+  operation: BrewOperation;
+  retrying: boolean;
+  onRetryWithMirror: (operation: BrewOperation) => void;
+  onRepairMissingCask: (operation: BrewOperation) => void;
+  cancelling: boolean;
+  onCancel: (operation: BrewOperation) => void;
+}) {
+  const guidance = useMemo(() => operationFailureGuidance(operation), [operation.logs, operation.status, operation.action]);
+  return (
+        <article className="operation-card">
           <header>
             <div>
               <strong>{actionLabels[operation.action]}</strong>
@@ -1866,9 +1931,9 @@ function OperationsList({
           {isOperationActive(operation) ? (
             <div className="operation-actions">
               <span>取消只会停止当前 Homebrew 进程，不会删除已经安装完成的项目。</span>
-              <button className="danger-subtle" type="button" onClick={() => onCancel(operation)} disabled={cancellingId === operation.id}>
-                {cancellingId === operation.id ? <Loader2 className="spin" size={14} /> : <CircleStop size={14} />}
-                {cancellingId === operation.id ? "正在停止" : operation.status === "queued" ? "移出队列" : "取消任务"}
+              <button className="danger-subtle" type="button" onClick={() => onCancel(operation)} disabled={cancelling}>
+                {cancelling ? <Loader2 className="spin" size={14} /> : <CircleStop size={14} />}
+                {cancelling ? "正在停止" : operation.status === "queued" ? "移出队列" : "取消任务"}
               </button>
             </div>
           ) : null}
@@ -1876,12 +1941,18 @@ function OperationsList({
             <div className="network-retry" role="status">
               <div>
                 <strong>看起来是网络连接问题</strong>
-                <span>可以切换到清华备用线路后，由你确认重新执行。</span>
+                <span>备用线路覆盖部分 Homebrew 下载；Cask 官网及 GitHub 附件仍可能失败。重试需要重新确认。</span>
               </div>
               <button className="ghost" type="button" onClick={() => onRetryWithMirror(operation)} disabled={retrying}>
                 <RefreshCw size={15} className={retrying ? "spin" : ""} />
                 {retrying ? "正在切换" : "备用线路重试"}
               </button>
+            </div>
+          ) : null}
+          {guidance ? (
+            <div className="risk-box" role="status">
+              <AlertTriangle size={18} />
+              <span>{guidance}</span>
             </div>
           ) : null}
           {hasMissingCaskAppSource(operation) ? (
@@ -1896,26 +1967,10 @@ function OperationsList({
               </button>
             </div>
           ) : null}
-          <div className="log-box">
-            {operation.logs.length ? (
-              operation.logs.slice(-200).map((log, index) => (
-                <p key={`${operation.id}-${index}`} className={log.stream}>
-                  <b>{log.stream}</b>
-                  <span>{log.line}</span>
-                </p>
-              ))
-            ) : (
-              <p className="stdout">
-                <b>system</b>
-                <span>等待 brew 输出...</span>
-              </p>
-            )}
-          </div>
+          <OperationLogs logs={operation.logs} />
         </article>
-      ))}
-    </div>
   );
-}
+});
 
 function SettingsPanel({
   environment,
@@ -1955,7 +2010,7 @@ function SettingsPanel({
   const translationCache = getTranslationCacheStats();
   const translationReady = Boolean(translationStatus?.installed && translationStatus.searchInstalled);
   return (
-    <div className="settings-panel">
+    <div className="settings-panel" data-scroll-view="settings">
       <form onSubmit={onSubmit}>
         <label htmlFor="brew-path">brew 路径</label>
         <p className="field-help">这里应填写本机 brew 可执行文件路径。Apple Silicon 默认通常是 `/opt/homebrew/bin/brew`。</p>
@@ -2396,6 +2451,12 @@ function ConfirmModal({
           <AlertTriangle size={18} />
           <span>请确认包名、类型和命令无误。需要交互式权限时，请复制命令到终端执行。</span>
         </div>
+        {(target?.kind === "cask" || action === "upgrade-all") ? (
+          <div className="risk-box">
+            <ShieldAlert size={18} />
+            <span>替换 .app 时，macOS 可能要求应用管理权限；软件更新后也可能重新申请自身权限。请核对弹窗中的应用和用途。BrewDesk 不会代为授权。需要管理员密码的安装请在终端完成。</span>
+          </div>
+        ) : null}
         {conflicts.length ? (
           <div className="risk-box blocking-risk">
             <ShieldAlert size={18} />

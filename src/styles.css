@@ -1811,6 +1811,33 @@ button:disabled {
   padding: 10px 0;
 }
 
+.operation-log-region {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.log-follow-button {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  padding: 6px 10px;
+  border: 1px solid #627b95;
+  border-radius: 8px;
+  background: #23364c;
+  color: #eef6ff;
+  font-size: 11px;
+  box-shadow: 0 2px 8px #0004;
+}
+
+.list-refresh {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  color: var(--muted);
+  font-size: 12px;
+  background: #f5f8fc;
+}
+
 .log-box.compact {
   max-height: none;
   min-height: 0;
