@@ -1,99 +1,46 @@
 # BrewDesk
 
-> 面向中文用户的非官方 Homebrew macOS 桌面客户端：透明显示实际命令，识别其他来源应用的安装冲突，并只对当前任务应用代理或镜像配置。
+给 Homebrew 加一个中文桌面界面：搜索软件、查看安装情况，在操作前确认实际要执行的命令。
 
 [English](README.md)
 
-BrewDesk 是独立社区项目，不由 Homebrew 开发、认可或支持。
+![BrewDesk 搜索界面](docs/screenshots/brewdesk-search.png)
 
-## 截图
+## 功能
 
-![BrewDesk 公开 Alpha 搜索界面](docs/screenshots/brewdesk-search.png)
+- 用英文名称、中文名称或本地别名搜索 Formula 和 Cask，查看版本、依赖和包详情。
+- 安装、卸载、更新或修复前预览 Homebrew 命令，执行时查看输出和进度。
+- 目标位置已有其他来源的应用时提醒，避免不知情地覆盖现有安装。
+- 查看可更新的软件；列表在后台刷新，返回时保留滚动位置。
+- 为当前任务使用系统代理、直连或镜像，不改写系统或 Shell 设置。
 
-该截图来自最终 Stage A `.app` 构建，并已按完整尺寸检查私人路径、软件清单、测试者或接收者信息、凭据、私有命令及无关应用。参见[截图捕获指南](docs/screenshots/CAPTURE_GUIDE.md)。
+Homebrew 修改操作会依次执行。更多细节见[更新说明](docs/UPDATE_RELIABILITY.md)。
 
-## 为什么有 BrewDesk
+## 使用与构建
 
-Homebrew 透明而强大，但终端优先的工作方式对部分中文 macOS 用户并不熟悉。BrewDesk 提供本地桌面界面，同时继续显示真实 Homebrew 操作并保留其命令行行为。
+目前是源码 Alpha，已验证环境为 **Apple Silicon Mac 和 macOS 26**。Intel Mac、macOS 14 和 macOS 15 尚未验证。
 
-## 已实现行为
+[Release 页面](https://github.com/Tsing-duan/brewdesk-homebrew/releases/tag/v0.1.0-alpha.1)提供源码，暂时没有安装包，也未完成 Developer ID 签名和 Apple 公证。
 
-- 使用英文名称、中文名称和本地维护的中文别名搜索 Formula 与 Cask。
-- 显示包详情、已安装版本、依赖、Homebrew 输出和操作阶段。
-- 在安装、卸载、升级或修复前预览真实 Homebrew 命令。
-- 检查 Cask 声明的应用路径；其他来源应用占用目标时给出警告。
-- 在 macOS 提供相关证据时识别 Mac App Store receipt。
-- 所有 Homebrew 变更操作进入单 worker 队列，避免并发执行。
-- 先显示本地可更新缓存，再在后台刷新。
-- 系统代理、直连或镜像变量只应用于当前子任务。
-- 自动选路会拒绝 HTTP 错误响应；变更操作完成后核对安装记录和声明的应用目标。
-- 搜索先显示可用结果，再补充可选翻译；后台刷新保留列表，返回时恢复滚动位置。
+从源码构建需要 Node.js 24 和仓库指定的 Rust 工具链。环境设置、构建目录要求与检查命令见[开发说明](docs/development.md)。
 
-本次更新内容、验证证据和仍未覆盖的边界见[更新可靠性与验证](docs/UPDATE_RELIABILITY.md)。
+## 使用前了解
 
-## 安全边界
+- 不采集 sudo 密码。需要交互的 Homebrew 安装会交给 Terminal 完成。
+- 不包含遥测、账号系统、分析 SDK 或软件清单上传。
+- 安装来源判断可能不完整，冲突提示不能替代手动确认。
+- 网络检查通过不保证所有第三方软件下载站都可用。
+- 界面主要在中文环境下验证。
 
-- Homebrew 操作使用“可执行文件 + argv 数组”，执行前验证包 token。
-- 搜索文本允许 UTF-8；会改变系统状态的目标使用严格 token 语法。
-- BrewDesk 不把代理或镜像设置写入 Homebrew、macOS 或 Shell profile。
-- BrewDesk 不采集 sudo 密码；交互式 Homebrew 安装交由 Terminal 完成。
-- 其他来源检测采用保守策略，无法可靠区分所有 DMG、PKG、手动复制或管理系统安装。
-- 不包含遥测、账号、分析 SDK 或软件清单上传。
+## 文档与反馈
 
-详见[安全模型](docs/SECURITY_MODEL.md)和[网络路由](docs/NETWORK_ROUTING.md)。
+- [已知限制](docs/KNOWN_LIMITATIONS.md)与[验证记录](docs/verification-notes.md)
+- [安全模型](docs/SECURITY_MODEL.md)与[网络设置](docs/NETWORK_ROUTING.md)
+- [路线图](docs/ROADMAP.md)与[贡献指南](CONTRIBUTING.md)
+- [问题反馈](SUPPORT.md)与[安全问题报告](SECURITY.md)
 
-## 平台合同
+## 来源与许可证
 
-当前验证目标为 Apple Silicon（`arm64`）与 macOS 26。这不能证明支持 Intel Mac、macOS 14 或 macOS 15。
+BrewDesk 是调用 Homebrew 的独立社区项目，与 Homebrew 官方无关。
 
-公共构建合同使用：
-
-- Node.js 24
-- npm lockfile安装
-- `rust-toolchain.toml` 中固定的精确 Rust toolchain
-- 项目本地 `@tauri-apps/cli` 2.11.4
-
-## 源码验证
-
-```bash
-install -d -m 700 /absolute/private/brewdesk-build
-export PUBLIC_BUILD_ROOT=/absolute/private/brewdesk-build
-export CARGO_TARGET_DIR="$PUBLIC_BUILD_ROOT/cargo-target"
-npm ci
-npm test
-npm run build
-npm run test:rust-output-boundary
-cargo fmt --check --manifest-path src-tauri/Cargo.toml
-cargo test --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features
-cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-```
-
-Rust、Swift、Vite、Tauri 和 `.app` 产物必须定向到仓库外私有构建根。未设置 `PUBLIC_BUILD_ROOT` 或其位于仓库内时，`scripts/build-native-helpers.sh` 会拒绝运行；Rust 边界测试还会证明 Tauri capability schemas 写入外部 Cargo target，而不是 `src-tauri/gen`。
-
-最终 Bundle Identifier 已确认为 `io.github.tsing-duan.brewdesk`。应用图标由 Codex 专门为 BrewDesk 生成，其来源记录见[素材来源](docs/ASSET_SOURCES.md)。Ad-hoc 验证只证明源码构建完整性，不代表 Gatekeeper、公证或二进制分发批准。
-
-## 测试
-
-Stage A 源码基线为前端 16 项、Rust 30 项。最终数量可以增加，但不得低于重新核验的真实基线。Skipped、ignored、filtered、todo 或空壳测试均不计数。
-
-## 已知限制
-
-- 当前界面和用户体验主要在中文环境中验证。
-- 网络探活只覆盖有限的 Homebrew、GitHub、registry 和镜像端点；第三方 Cask 下载站仍可能独立失败。
-- 应用来源分类基于可观察证据，但不完整。
-- 当前 Alpha 不提供已签名或公证的公开二进制。
-- 二进制分发仍未批准，需另行完成版本对应的第三方许可声明包、签名、公证和分发批准。
-
-详见[已知限制](docs/KNOWN_LIMITATIONS.md)和[路线图](docs/ROADMAP.md)。
-
-## 贡献与支持
-
-提出修改前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)、[AGENTS.md](AGENTS.md) 和 [SUPPORT.md](SUPPORT.md)。安全问题按 [SECURITY.md](SECURITY.md) 处理。
-
-## 许可证
-
-BrewDesk 源码采用 [MIT License](LICENSE)。第三方依赖及单独授权材料继续适用其各自条款，参见 [NOTICE.md](NOTICE.md) 和[素材来源](docs/ASSET_SOURCES.md)。
-
-## 独立项目声明
-
-Homebrew 及相关名称属于各自权利人。BrewDesk 不声称官方身份、认可、合作关系或超出现有证据的平台兼容性。
+源码采用 [MIT License](LICENSE)。第三方依赖保留各自许可，见 [NOTICE.md](NOTICE.md)。应用图标由 Codex 生成，见[素材来源](docs/ASSET_SOURCES.md)。

@@ -1,99 +1,46 @@
 # BrewDesk
 
-> An unofficial, Chinese-first desktop client for Homebrew on macOS. BrewDesk keeps commands visible, detects conflicts with apps installed from other sources, and applies proxy or mirror settings only to the current task.
+A Chinese-first desktop interface for Homebrew. Search packages, check what is installed, and review the command before running it.
 
 [简体中文](README.zh-CN.md)
 
-BrewDesk is an independent community project. It is not developed, endorsed, or supported by Homebrew.
+![BrewDesk search screen](docs/screenshots/brewdesk-search.png)
 
-## Screenshot
+## Features
 
-![BrewDesk public Alpha search screen](docs/screenshots/brewdesk-search.png)
+- Search Formulae and Casks by English name, Chinese name, or local aliases. View versions, dependencies, and package details.
+- Preview commands before installing, uninstalling, upgrading, or repairing packages, then follow their output and progress.
+- Get a warning when another application occupies the target path, so you can check before replacing an existing installation.
+- Browse available updates. Lists refresh in the background and remember your scroll position when you return.
+- Use a system proxy, direct connection, or mirror for the current task without changing system or shell settings.
 
-This screenshot was captured from the final Stage A `.app` build and reviewed at full size for private paths, software inventory, tester or recipient information, credentials, private commands, and unrelated applications. See [the capture guide](docs/screenshots/CAPTURE_GUIDE.md).
+Homebrew operations that make changes run one at a time. See the [update notes](docs/UPDATE_RELIABILITY.md) for more detail.
 
-## Why BrewDesk exists
+## Using and building BrewDesk
 
-Homebrew is transparent and powerful, but its terminal-first workflow can be unfamiliar to some Chinese-speaking macOS users. BrewDesk provides a local desktop interface while keeping the actual Homebrew operation visible and preserving Homebrew's command-line behavior.
+This is a source Alpha. The verified environment is **Apple Silicon on macOS 26**. Intel Macs, macOS 14, and macOS 15 have not been verified.
 
-## Implemented behavior
+The [release page](https://github.com/Tsing-duan/brewdesk-homebrew/releases/tag/v0.1.0-alpha.1) provides source code. There is no application installer yet, and Developer ID signing and Apple notarization are not complete.
 
-- Search Formulae and Casks using English names, Chinese names, and curated local aliases.
-- Show package details, installed versions, dependencies, Homebrew output, and operation phases.
-- Preview the real Homebrew command before an install, uninstall, upgrade, or repair operation.
-- Detect declared Cask application paths and warn when an application from another source already occupies the target.
-- Distinguish Mac App Store receipts where macOS provides that evidence.
-- Queue Homebrew mutations through one worker instead of running them concurrently.
-- Display cached outdated-package data immediately and refresh it in the background.
-- Apply a system proxy, direct route, or mirror variables to the current child task only.
-- Reject failed HTTP routes before automatic selection and verify installed package/application evidence after mutations.
-- Show usable results before optional translation finishes, preserve lists during refresh, and restore their scroll position on return.
+Building from source requires Node.js 24 and the repository's specified Rust toolchain. See the [development guide](docs/development.md) for environment setup, build-directory requirements, and check commands.
 
-See [Update Reliability and Validation](docs/UPDATE_RELIABILITY.md) for the current fixes, verification, and remaining limits.
+## Before using it
 
-## Security boundaries
+- BrewDesk does not collect sudo passwords. Interactive Homebrew installation runs in Terminal.
+- There is no telemetry, account system, analytics SDK, or software-inventory upload.
+- Application-origin detection can be incomplete. Review any installation conflict yourself before proceeding.
+- Passing a network check does not guarantee that every third-party download host will work.
+- The interface has mainly been evaluated in Chinese.
 
-- Homebrew actions are represented as an executable plus an argv array; package tokens are validated before execution.
-- UTF-8 is accepted for search text, but mutation targets use a strict token grammar.
-- BrewDesk does not persist proxy or mirror settings to Homebrew, macOS, or shell profiles.
-- BrewDesk does not collect sudo passwords. Interactive Homebrew installation is delegated to Terminal.
-- Other-source application detection is conservative. It cannot reliably distinguish every DMG, PKG, manual copy, or management-system installation.
-- No telemetry, account system, analytics SDK, or software-inventory upload is included.
+## Documentation and feedback
 
-More detail is available in [Security Model](docs/SECURITY_MODEL.md) and [Network Routing](docs/NETWORK_ROUTING.md).
+- [Known limitations](docs/KNOWN_LIMITATIONS.md) and [verification records](docs/verification-notes.md)
+- [Security model](docs/SECURITY_MODEL.md) and [network settings](docs/NETWORK_ROUTING.md)
+- [Roadmap](docs/ROADMAP.md) and [contributing](CONTRIBUTING.md)
+- [Support](SUPPORT.md) and [security reports](SECURITY.md)
 
-## Platform contract
+## Attribution and license
 
-The current verified target is Apple Silicon (`arm64`) on macOS 26. This does not establish support for Intel Macs, macOS 14, or macOS 15.
+BrewDesk is an independent community project that uses Homebrew. It is not affiliated with Homebrew.
 
-The public build contract uses:
-
-- Node.js 24
-- npm lockfile installation
-- an exact Rust toolchain recorded in `rust-toolchain.toml`
-- the project-local `@tauri-apps/cli` 2.11.4
-
-## Source verification
-
-```bash
-install -d -m 700 /absolute/private/brewdesk-build
-export PUBLIC_BUILD_ROOT=/absolute/private/brewdesk-build
-export CARGO_TARGET_DIR="$PUBLIC_BUILD_ROOT/cargo-target"
-npm ci
-npm test
-npm run build
-npm run test:rust-output-boundary
-cargo fmt --check --manifest-path src-tauri/Cargo.toml
-cargo test --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features
-cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-```
-
-Rust, Swift, Vite, Tauri, and `.app` outputs must be directed to a private build root outside the repository. `scripts/build-native-helpers.sh` rejects an unset or in-repository `PUBLIC_BUILD_ROOT`; the Rust boundary test also proves that Tauri capability schemas are emitted under the external Cargo target instead of `src-tauri/gen`.
-
-The final Bundle Identifier is `io.github.tsing-duan.brewdesk`. The application icon was generated specifically for BrewDesk with Codex and is documented in [Asset Sources](docs/ASSET_SOURCES.md). Ad-hoc verification is a source-build integrity check; it is not Gatekeeper approval, notarization, or binary distribution approval.
-
-## Tests
-
-The Stage A source baseline is 16 frontend tests and 30 Rust tests. Final counts may increase but must never fall below the re-verified baseline. Skipped, ignored, filtered, todo, or empty tests do not count.
-
-## Known limitations
-
-- The interface and user experience have primarily been evaluated in Chinese.
-- Network probes cover a bounded group of Homebrew, GitHub, registry, and mirror endpoints; third-party Cask download hosts can still fail independently.
-- Application-origin classification is evidence-based but incomplete.
-- This Alpha does not include a signed or notarized public binary.
-- Binary distribution remains unapproved pending a version-specific third-party notice bundle, signing, notarization, and separate distribution approval.
-
-See [Known Limitations](docs/KNOWN_LIMITATIONS.md) and [Roadmap](docs/ROADMAP.md).
-
-## Contributing and support
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md), and [SUPPORT.md](SUPPORT.md) before proposing changes. Security reports follow [SECURITY.md](SECURITY.md).
-
-## License
-
-BrewDesk source is available under the [MIT License](LICENSE). Third-party dependencies and separately licensed material retain their own terms; see [NOTICE.md](NOTICE.md) and [Asset Sources](docs/ASSET_SOURCES.md).
-
-## Independent project notice
-
-Homebrew and related names belong to their respective owners. BrewDesk does not claim official status, endorsement, partnership, or compatibility beyond the evidence recorded in this repository.
+Source code uses the [MIT License](LICENSE). Third-party dependencies retain their own terms; see [NOTICE.md](NOTICE.md). The application icon was generated with Codex; see [asset sources](docs/ASSET_SOURCES.md).
