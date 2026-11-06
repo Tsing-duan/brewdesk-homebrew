@@ -14,4 +14,4 @@ Before capture:
 
 Record privately the application revision, macOS version, capture date, screen, rights basis, privacy reviewer, and any redactions. Public files should use descriptive names and alt text without embedding personal metadata. Remove unnecessary EXIF or location metadata before inclusion.
 
-The retained Stage A search-screen screenshot completed these checks. Any replacement or additional screenshot must repeat the same content-rights and privacy review.
+The current search and settings screenshots completed these checks on 2026-11-06. Capture conditions and hashes are recorded in `../ASSET_SOURCES.md`; the Stage A screenshot remains in Git history. Every replacement or addition must repeat the same review.

@@ -1,5 +1,7 @@
 # Publication Checklist — Draft Only
 
+> Historical Stage A record, retained for provenance. The first source prerelease was published on 2026-08-28; statements below about an unpublished repository refer to that earlier preparation stage. For current status, see the [public releases](https://github.com/Tsing-duan/brewdesk-homebrew/releases) and current verification records.
+
 This checklist prepares a possible Stage B. It does not authorize repository creation, remote configuration, push, tag creation, Release creation, binary upload, or third-party contact.
 
 ## Confirmed Stage A decisions

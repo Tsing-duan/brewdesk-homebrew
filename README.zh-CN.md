@@ -16,11 +16,21 @@
 
 Homebrew 修改操作会依次执行。更多细节见[更新说明](docs/UPDATE_RELIABILITY.md)。
 
+## 本次更新
+
+窄窗口导航保留文字标签；详情页可返回列表并保留搜索结果与滚动位置。设置先显示状态和下载线路，高级路径与可选翻译按需展开。
+
+![BrewDesk 原生设置界面：状态、下载线路与折叠的高级选项](docs/screenshots/brewdesk-settings.png)
+
+本次实现通过 35 项前端测试、43 项 Rust 测试和[三项 GitHub CI 检查](https://github.com/Tsing-duan/brewdesk-homebrew/actions/runs/42214098425)。依赖更新、审计警告与验证范围见[维护说明](docs/MAINTENANCE_2026-11.md)。
+
+两张截图均于 2026-11-06 从真实 `.app` 拍摄，不是浏览器模拟预览。截图不代表真实安装更新、权限弹窗或全部交互已验收。
+
 ## 使用与构建
 
 目前是源码 Alpha，已验证环境为 **Apple Silicon Mac 和 macOS 26**。Intel Mac、macOS 14 和 macOS 15 尚未验证。
 
-[Release 页面](https://github.com/Tsing-duan/brewdesk-homebrew/releases/tag/v0.1.0-alpha.1)提供源码，暂时没有安装包，也未完成 Developer ID 签名和 Apple 公证。
+[Release 页面](https://github.com/Tsing-duan/brewdesk-homebrew/releases/tag/v0.1.0-alpha.2)提供源码，暂时没有安装包，也未完成 Developer ID 签名和 Apple 公证。
 
 从源码构建需要 Node.js 24 和仓库指定的 Rust 工具链。环境设置、构建目录要求与检查命令见[开发说明](docs/development.md)。
 

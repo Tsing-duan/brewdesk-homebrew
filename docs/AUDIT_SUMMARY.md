@@ -1,5 +1,7 @@
 # Public Audit Summary
 
+> Historical Stage A record, retained for provenance. The first source prerelease was published on 2026-08-28; statements below about an unpublished repository refer to that earlier preparation stage. For current status, see the [public releases](https://github.com/Tsing-duan/brewdesk-homebrew/releases) and current verification records.
+
 This is the redacted Stage A summary for the local BrewDesk public-release candidate. The complete report, command evidence, absolute paths, dependency inventories, tool artifacts, and audit deviation record are stored outside this repository with private `0700` directory and `0600` file permissions.
 
 ## Source

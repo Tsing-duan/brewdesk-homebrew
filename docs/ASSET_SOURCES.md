@@ -36,4 +36,25 @@ The source release contains no pre-generated curated Chinese description table. 
 
 Repository screenshots must be captured from the final rights-cleared BrewDesk build and privacy-reviewed before publication. They must not expose user paths, private software inventory, tester or recipient information, private commands, credentials, or unlicensed third-party artwork. Each retained screenshot is documented alongside its capture conditions.
 
-`docs/screenshots/brewdesk-search.png` was captured on 2026-08-28 from the verified Stage A `BrewDesk.app` on macOS 26.6.2 (`arm64`) after the approved icon was applied to the in-app brand area and the final repository-output boundary fix was built. It shows the neutral initial search screen, contains no package inventory or operation history, was converted to metadata-free PNG for inclusion, and has SHA-256 `817e40def001a1d80c8db5381d7f5689dcb9caef36114ac785a1996493b07dcd`.
+The current screenshots were captured on 2026-11-06 from the verified native
+`BrewDesk.app`, built from source commit `ec1e9330229ca53025ddb95652406b81e3e56286`,
+on macOS 27.0.1 (`arm64`). This is a limited native UI observation, not a broader
+platform-support claim; the CI build environment remains macOS 26.
+
+- `brewdesk-search.png`: neutral initial search screen; no package inventory or operation history.
+- `brewdesk-settings.png`: status and download routes, with optional translation and advanced paths collapsed. The displayed Homebrew version is a capture-time local observation, not a claim about the latest upstream version.
+
+Both images were reviewed at full size. They contain no user names, home paths,
+private inventories, credentials, tester identities, or unrelated windows.
+Only existing project assets, interface icons, and rendered system fonts are shown.
+Original capture JPEGs were converted to PNG; EXIF and XMP metadata were removed.
+The final PNGs contain no text, EXIF, location, or timestamp metadata. No crop,
+composition, or redaction was applied. Private capture records retain revision,
+environment, rights basis, privacy review, and original captures.
+
+| Screenshot | SHA-256 |
+| --- | --- |
+| `docs/screenshots/brewdesk-search.png` | `25528f66b35d262ef1a0eaaf43d4d70030fbaf53570f17a63fb0fdddd03529b7` |
+| `docs/screenshots/brewdesk-settings.png` | `1872410a36d208619c9a3425699768bfd4dd210874c6086f5a128151fa76aee3` |
+
+The former Stage A search screenshot remains available in Git history.

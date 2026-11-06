@@ -1,5 +1,7 @@
 # BrewDesk v0.1.0-alpha.1 Release Notes — Draft
 
+> Historical Stage A record, retained for provenance. The first source prerelease was published on 2026-08-28; statements below about an unpublished repository refer to that earlier preparation stage. For current status, see the [public releases](https://github.com/Tsing-duan/brewdesk-homebrew/releases) and current verification records.
+
 Status: publication draft only. No tag or Release exists, and binary distribution is not approved.
 
 ## Summary

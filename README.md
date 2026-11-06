@@ -16,11 +16,21 @@ A Chinese-first desktop interface for Homebrew. Search packages, check what is i
 
 Homebrew operations that make changes run one at a time. See the [update notes](docs/UPDATE_RELIABILITY.md) for more detail.
 
+## This update
+
+Compact navigation keeps text labels. Package details have a return action that preserves search results and scroll position. Settings put status and download routes first, with advanced paths and optional translation disclosed on demand.
+
+![Native BrewDesk settings: status, download routes, and collapsed advanced options](docs/screenshots/brewdesk-settings.png)
+
+The implementation passed 35 frontend tests, 43 Rust tests, and [all three GitHub CI jobs](https://github.com/Tsing-duan/brewdesk-homebrew/actions/runs/42214098425). See the [maintenance notes](docs/MAINTENANCE_2026-11.md) for dependency changes, remaining audit warnings, and verification scope.
+
+Both screenshots were captured from the real `.app` on November 6, 2026, not a browser mock. Screenshots do not establish acceptance of real upgrades, permission prompts, or every interaction.
+
 ## Using and building BrewDesk
 
 This is a source Alpha. The verified environment is **Apple Silicon on macOS 26**. Intel Macs, macOS 14, and macOS 15 have not been verified.
 
-The [release page](https://github.com/Tsing-duan/brewdesk-homebrew/releases/tag/v0.1.0-alpha.1) provides source code. There is no application installer yet, and Developer ID signing and Apple notarization are not complete.
+The [release page](https://github.com/Tsing-duan/brewdesk-homebrew/releases/tag/v0.1.0-alpha.2) provides source code. There is no application installer yet, and Developer ID signing and Apple notarization are not complete.
 
 Building from source requires Node.js 24 and the repository's specified Rust toolchain. See the [development guide](docs/development.md) for environment setup, build-directory requirements, and check commands.
 
