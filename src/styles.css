@@ -60,7 +60,7 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 summary:focus-visible {
-  outline: 3px solid rgba(23, 105, 224, 0.18);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -166,6 +166,7 @@ code {
 }
 
 .nav-item {
+  position: relative;
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
@@ -2412,7 +2413,7 @@ button:disabled {
 
 @media (max-width: 1080px) {
   .app-shell {
-    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-columns: 88px minmax(0, 1fr);
   }
 
   .brand {
@@ -2421,7 +2422,6 @@ button:disabled {
   }
 
   .brand > div:not(.brand-mark),
-  .nav-item span,
   .env-card div {
     display: none;
   }
@@ -2429,6 +2429,21 @@ button:disabled {
   .nav-item {
     grid-template-columns: 1fr;
     justify-items: center;
+    gap: 4px;
+    min-height: 58px;
+    padding: 8px 3px;
+  }
+
+  .nav-item span {
+    font-size: 11px;
+  }
+
+  .nav-item b {
+    position: absolute;
+    top: 2px;
+    right: 0;
+    min-width: 17px;
+    line-height: 17px;
   }
 
   .env-card {
@@ -2441,12 +2456,12 @@ button:disabled {
   }
 
   .content-grid {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) minmax(380px, auto);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
   }
 
-  .detail-panel {
-    min-height: 420px;
+  .content-grid:not(.single) > .main-panel {
+    display: none;
   }
 }
 
@@ -2609,4 +2624,49 @@ button:disabled {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/* Keep navigation available while detail content scrolls. */
+.detail-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.detail-navigation {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.detail-navigation button {
+  min-height: 40px;
+}
+
+.settings-disclosure {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.settings-disclosure summary {
+  min-height: 44px;
+  padding: 12px 14px;
+  font-size: 12.5px;
+  font-weight: 720;
+  list-style-position: inside;
+}
+
+.settings-disclosure-body {
+  padding: 0 14px 14px;
+}
+
+.settings-disclosure .translation-settings-card {
+  margin: 0 14px 14px;
+}
+
+@media (max-width: 760px) {
+  .nav-list { justify-content: space-around; }
+  .nav-item { flex: 1; }
+  .content-grid { grid-template-rows: auto; }
+  .content-grid > .main-panel { min-height: 400px; }
+  .detail-content { height: auto; }
 }

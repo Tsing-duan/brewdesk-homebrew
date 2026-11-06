@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   AppWindow,
+  ArrowLeft,
   CheckCircle2,
   CircleStop,
   Clipboard,
@@ -794,6 +795,8 @@ export default function App() {
                 key={item.key}
                 className={activeView === item.key ? "nav-item selected" : "nav-item"}
                 aria-current={activeView === item.key ? "page" : undefined}
+                aria-label={item.label}
+                title={item.label}
                 onClick={() => {
                   if (item.key !== activeView) {
                     const list = mainPanel.current?.querySelector<HTMLElement>(`[data-scroll-view="${activeView}"]`);
@@ -865,7 +868,7 @@ export default function App() {
               <option value="cask">cask</option>
               <option value="formula">formula</option>
             </select>
-            <button type="submit" className="primary search-submit" disabled={loading || searchQuery.trim().length < 2}>
+            <button type="submit" aria-label="提交搜索" className="primary search-submit" disabled={loading || searchQuery.trim().length < 2}>
               {loading ? <Loader2 className="spin" size={16} /> : <PackageSearch size={16} />}
               <span>搜索</span>
             </button>
@@ -904,7 +907,7 @@ export default function App() {
         ) : null}
 
         <div className={detailVisible ? "content-grid" : "content-grid single"}>
-          <section className="main-panel" ref={mainPanel} onScrollCapture={(event) => {
+          <section className="main-panel" tabIndex={-1} ref={mainPanel} onScrollCapture={(event) => {
             const node = event.target as HTMLElement;
             const view = node.dataset.scrollView;
             if (node.isConnected && views.some((item) => item.key === view)) {
@@ -922,6 +925,7 @@ export default function App() {
                 if (activeView === "installed") void refreshInstalled();
                 if (activeView === "outdated") void refreshOutdated();
                 if (activeView === "search") void submitSearch();
+                if (activeView === "settings") void refreshEnvironment();
               }}
               onUpgradeAll={() => requestAction("upgrade-all")}
               disabled={upgradesPending}
@@ -1007,7 +1011,20 @@ export default function App() {
           </section>
 
           {detailVisible ? (
-            <aside className="detail-panel">
+            <aside className="detail-panel" aria-label="软件详情">
+              <div className="detail-navigation">
+                <button className="ghost" autoFocus onClick={() => {
+                  detailRequest.current += 1;
+                  setSelectedSummary(null);
+                  setSelectedDetail(null);
+                  setSelectedLocalApplication(null);
+                  setDetailLoading(false);
+                  requestAnimationFrame(() => mainPanel.current?.focus());
+                }}>
+                  <ArrowLeft size={16} aria-hidden="true" />
+                  返回列表
+                </button>
+              </div>
               {selectedLocalApplication ? (
                 <LocalApplicationDetail application={selectedLocalApplication} onReveal={revealInFinder} />
               ) : (
@@ -1301,7 +1318,7 @@ function PanelHeader({
       : activeView === "operations"
         ? "这里保留 brew 的 stdout / stderr，失败时优先查看最后几行错误和下载 URL。"
         : activeView === "settings"
-          ? "配置 brew 路径、检测 Homebrew 环境，并查看代理和网络使用说明。"
+          ? "查看 Homebrew 状态和下载线路；路径与可选功能可按需展开。"
           : activeView === "installed"
             ? "按 Homebrew 与其他渠道分组；其他渠道仅展示本机信息，Mac App Store 应用不列入。"
             : hasSearched
@@ -2011,16 +2028,6 @@ function SettingsPanel({
   const translationReady = Boolean(translationStatus?.installed && translationStatus.searchInstalled);
   return (
     <div className="settings-panel" data-scroll-view="settings">
-      <form onSubmit={onSubmit}>
-        <label htmlFor="brew-path">brew 路径</label>
-        <p className="field-help">这里应填写本机 brew 可执行文件路径。Apple Silicon 默认通常是 `/opt/homebrew/bin/brew`。</p>
-        <div className="path-row">
-          <input id="brew-path" value={brewPathDraft} onChange={(event) => setBrewPathDraft(event.target.value)} />
-          <button className="primary" type="submit">
-            保存
-          </button>
-        </div>
-      </form>
       <dl className="env-table">
         <div>
           <dt>状态</dt>
@@ -2030,47 +2037,11 @@ function SettingsPanel({
           <dt>版本</dt>
           <dd>{environment?.version ?? "-"}</dd>
         </div>
-        <div>
-          <dt>prefix</dt>
-          <dd>{environment?.prefix ?? "-"}</dd>
-        </div>
-        <div>
-          <dt>架构</dt>
-          <dd>{environment?.arch ?? "-"}</dd>
-        </div>
       </dl>
       <button className="ghost" type="button" onClick={onRefresh} disabled={loading}>
         <RefreshCw size={15} className={loading ? "spin" : ""} />
         {loading ? "检测中" : "重新检测"}
       </button>
-      <section className="translation-settings-card">
-        <div>
-          <span className={translationReady ? "translation-status installed" : "translation-status"}>
-            {translationReady ? <CheckCircle2 size={15} /> : <Download size={15} />}
-            {translationReady ? "已启用" : "可选功能"}
-          </span>
-          <h3>Apple 本机中文翻译</h3>
-          <p>
-            {`${translationStatus?.message ?? "正在检测 Apple 本机中英文语言能力"}。简介与中文搜索词均只在这台 Mac 上处理。`}
-          </p>
-          <div className="translation-storage-meta">
-            <span>简介缓存 {formatBytes(translationCache.bytes) ?? "0 B"} · {translationCache.entries} 条</span>
-            <span>Apple 语言包大小由 macOS 管理</span>
-          </div>
-        </div>
-        <div className="translation-settings-actions">
-          {!translationReady && translationStatus?.status !== "unsupported" && translationStatus?.status !== "unavailable" ? (
-            <button className="primary" type="button" onClick={onPrepareTranslation} disabled={translationLoading}>
-              {translationLoading ? <Loader2 className="spin" size={15} /> : <Download size={15} />}
-              下载语言包
-            </button>
-          ) : null}
-          <button className="ghost" type="button" onClick={onRefreshTranslation} disabled={translationLoading}>
-            <RefreshCw size={15} className={translationLoading ? "spin" : ""} />
-            重新检测
-          </button>
-        </div>
-      </section>
       <fieldset className="network-mode-card">
         <legend>下载线路</legend>
         <p>推荐保留“稳态自动”：联网任务开始前会检查线路，避开“代理开启但实际不可用”的假在线状态。</p>
@@ -2134,7 +2105,7 @@ function SettingsPanel({
         <div className="network-test-row">
           <button className="ghost" type="button" onClick={onTestNetwork} disabled={networkTestLoading || networkLoading}>
             {networkTestLoading ? <Loader2 className="spin" size={15} /> : <Stethoscope size={15} />}
-            {networkTestLoading ? "正在测试" : "测试当前模板"}
+            {networkTestLoading ? "正在测试" : "测试当前线路"}
           </button>
           {networkTest ? (
             <span className={networkTest.reachable ? "network-test-result reachable" : "network-test-result failed"} role="status">
@@ -2146,6 +2117,62 @@ function SettingsPanel({
           )}
         </div>
       </fieldset>
+      <details className="settings-disclosure">
+        <summary>可选功能：本机中文翻译 · {translationReady ? "已启用" : "未启用"}</summary>
+        <section className="translation-settings-card">
+          <div>
+            <span className={translationReady ? "translation-status installed" : "translation-status"}>
+              {translationReady ? <CheckCircle2 size={15} /> : <Download size={15} />}
+              {translationReady ? "已启用" : "可选功能"}
+            </span>
+            <h3>Apple 本机中文翻译</h3>
+            <p>
+              {`${translationStatus?.message ?? "正在检测 Apple 本机中英文语言能力"}。简介与中文搜索词均只在这台 Mac 上处理。`}
+            </p>
+            <div className="translation-storage-meta">
+              <span>简介缓存 {formatBytes(translationCache.bytes) ?? "0 B"} · {translationCache.entries} 条</span>
+              <span>Apple 语言包大小由 macOS 管理</span>
+            </div>
+          </div>
+          <div className="translation-settings-actions">
+            {!translationReady && translationStatus?.status !== "unsupported" && translationStatus?.status !== "unavailable" ? (
+              <button className="primary" type="button" onClick={onPrepareTranslation} disabled={translationLoading}>
+                {translationLoading ? <Loader2 className="spin" size={15} /> : <Download size={15} />}
+                下载语言包
+              </button>
+            ) : null}
+            <button className="ghost" type="button" onClick={onRefreshTranslation} disabled={translationLoading}>
+              <RefreshCw size={15} className={translationLoading ? "spin" : ""} />
+              重新检测
+            </button>
+          </div>
+        </section>
+      </details>
+      <details className="settings-disclosure" key={environment?.ok === false ? "needs-repair" : "ready"} open={environment?.ok === false}>
+        <summary>高级设置：Homebrew 路径与环境</summary>
+        <div className="settings-disclosure-body">
+          <form onSubmit={onSubmit}>
+            <label htmlFor="brew-path">brew 路径</label>
+            <p className="field-help">这里应填写本机 brew 可执行文件路径。Apple Silicon 默认通常是 `/opt/homebrew/bin/brew`。</p>
+            <div className="path-row">
+              <input id="brew-path" value={brewPathDraft} onChange={(event) => setBrewPathDraft(event.target.value)} />
+              <button className="primary" type="submit">
+                保存
+              </button>
+            </div>
+          </form>
+          <dl className="env-table">
+            <div>
+              <dt>prefix</dt>
+              <dd>{environment?.prefix ?? "-"}</dd>
+            </div>
+            <div>
+              <dt>架构</dt>
+              <dd>{environment?.arch ?? "-"}</dd>
+            </div>
+          </dl>
+        </div>
+      </details>
       <details className="network-notes">
         <summary>网络与代理说明</summary>
         <p>

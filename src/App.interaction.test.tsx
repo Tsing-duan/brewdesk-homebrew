@@ -64,6 +64,48 @@ async function search(query: string) {
 }
 
 describe("responsive asynchronous package flows", () => {
+  it("keeps navigation named independently of visually hidden labels", async () => {
+    await mount();
+    const labels = [...container.querySelectorAll('nav button')].map((button) => button.getAttribute('aria-label'));
+    expect(labels).toEqual(["搜索", "已安装", "可更新", "操作记录", "设置"]);
+    expect(container.querySelector('button[aria-label="提交搜索"]')).not.toBeNull();
+  });
+
+  it("returns from package details without losing search results or scroll", async () => {
+    vi.spyOn(brewApi, "searchPackages").mockResolvedValue(response(alpha));
+    vi.spyOn(brewApi, "packageInfo").mockResolvedValue({
+      ...alpha, homepage: "https://example.com", version: "1.0", installedVersions: ["1.0"],
+      dependencies: [], commandName: alpha.token, detectedApplications: []
+    });
+    await mount();
+    await search("alpha");
+    const list = container.querySelector<HTMLElement>('[data-scroll-view="search"]')!;
+    list.scrollTop = 120;
+    await click("Alpha Tool，Homebrew formula");
+    expect(container.querySelector('[aria-label="软件详情"]')).not.toBeNull();
+    await click("返回列表");
+    expect(container.querySelector('[aria-label="软件详情"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Alpha Tool，Homebrew formula"]')).not.toBeNull();
+    expect(list.scrollTop).toBe(120);
+    expect(brewApi.searchPackages).toHaveBeenCalledTimes(1);
+  });
+
+  it("discloses advanced settings on demand, but exposes them for a broken environment", async () => {
+    const environment = { brewPath: "/opt/homebrew/bin/brew", version: "Homebrew", prefix: "/opt/homebrew", arch: "arm64", ok: true, message: "Ready" };
+    vi.spyOn(brewApi, "environment").mockResolvedValue(environment);
+    await mount();
+    await click("设置");
+    const advanced = () => container.querySelector<HTMLInputElement>('#brew-path')!.closest('details')!;
+    expect(advanced().open).toBe(false);
+    const optional = [...container.querySelectorAll('details')].find((item) => item.querySelector('summary')?.textContent?.startsWith('可选功能'))!;
+    expect(optional.open).toBe(false);
+    vi.mocked(brewApi.environment).mockResolvedValue({ ...environment, ok: false, message: "Path unavailable" });
+    await click("刷新");
+    expect(brewApi.environment).toHaveBeenCalledTimes(2);
+    expect(advanced().open).toBe(true);
+    expect(container.textContent).toContain("Path unavailable");
+  });
+
   it("shows search results before slow optional translation finishes", async () => {
     const translated = deferred<PackageSummary[]>();
     vi.mocked(translation.addChineseDescriptions).mockReturnValue(translated.promise);

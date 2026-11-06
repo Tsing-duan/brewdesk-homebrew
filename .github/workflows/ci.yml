@@ -33,7 +33,7 @@ jobs:
           swift --version
           node --version
           npm --version
-          rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy --component llvm-tools-preview
           rustc --version --verbose
           cargo --version --verbose
           rustfmt --version
@@ -95,7 +95,7 @@ jobs:
           package-manager-cache: false
       - name: Install exact build contracts
         run: |
-          rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy --component llvm-tools-preview
           npm ci
           ./node_modules/.bin/tauri --version
       - name: Build and verify ad-hoc application outside the repository

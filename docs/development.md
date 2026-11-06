@@ -1,7 +1,7 @@
 # 源码检查与构建
 
 
-需要 Node.js 24、`rust-toolchain.toml` 指定的 Rust 工具链，以及项目本地的 `@tauri-apps/cli` 2.11.4。使用锁文件安装依赖。
+需要 Node.js 24、`rust-toolchain.toml` 指定的 Rust 工具链，以及项目本地的 `@tauri-apps/cli` 2.11.4。使用锁文件安装依赖。Rust 组件包含 `rustfmt`、`clippy` 和发布构建使用的 `llvm-tools-preview`。
 
 构建输出应放在仓库外的私有目录。下面是仓库现有的源码检查步骤，请先把 `/absolute/private/brewdesk-build` 改成自己的绝对路径：
 

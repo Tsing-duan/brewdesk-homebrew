@@ -6,10 +6,10 @@ BrewDesk source code is licensed under the MIT License. Third-party dependencies
 
 | Component | Version in lockfile | License |
 | --- | ---: | --- |
-| `@tauri-apps/api` | 2.11.1 | Apache-2.0 OR MIT |
+| `@tauri-apps/api` | 2.12.4 | Apache-2.0 OR MIT |
 | `lucide-react` | 0.525.0 | ISC |
-| `react` | 19.2.8 | MIT |
-| `react-dom` | 19.2.8 | MIT |
+| `react` | 19.3.1 | MIT |
+| `react-dom` | 19.3.1 | MIT |
 
 Development dependencies and their complete transitive versions are recorded in `package-lock.json`. Build-only dependencies remain governed by their own licenses, including the CC-BY-4.0 data package `caniuse-lite`.
 
@@ -17,7 +17,7 @@ Development dependencies and their complete transitive versions are recorded in 
 
 The exact Rust dependency versions are recorded in `src-tauri/Cargo.lock`. The Apple Silicon macOS graph includes components offered under MIT, Apache-2.0, ISC, BSD, Zlib, Unicode-3.0, CC0, and Unlicense-family terms.
 
-The direct `plist` 1.10.0 dependency (MIT) parses local application metadata; it was already present transitively in the locked graph.
+The direct `plist` 1.10.3 dependency (MIT) parses local application metadata; it was already present transitively in the locked graph.
 
 The graph also includes unmodified MPL-2.0 components such as `cssparser`, `cssparser-macros`, `dtoa-short`, `option-ext`, and `selectors`. Their covered source remains available from the repositories identified in their Cargo package metadata. BrewDesk does not relicense or claim ownership of those files.
 
